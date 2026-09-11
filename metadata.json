@@ -1,0 +1,6 @@
+{
+  "name": "Bắt Lấy",
+  "description": "Nhật ký âm nhạc sáng tạo cá nhân - Một ý nghĩ thoáng qua. Một giai điệu ở lại.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
