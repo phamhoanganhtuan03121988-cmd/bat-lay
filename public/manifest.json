@@ -1,17 +1,17 @@
 {
-  "id": "/",
+  "id": "/bat-lay/",
   "name": "BẮT LẤY",
   "short_name": "Bắt Lấy",
   "description": "Nhật ký âm nhạc sáng tạo cá nhân - Một ý nghĩ thoáng qua. Một giai điệu ở lại.",
-  "start_url": "/",
-  "scope": "/",
+  "start_url": "/bat-lay/",
+  "scope": "/bat-lay/",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#070B14",
   "theme_color": "#070B14",
   "icons": [
     {
-      "src": "/icon.svg",
+      "src": "/bat-lay/icon.svg",
       "sizes": "192x192 512x512",
       "type": "image/svg+xml",
       "purpose": "any"
