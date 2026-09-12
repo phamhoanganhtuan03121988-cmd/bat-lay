@@ -128,7 +128,7 @@ export const RecordingView: React.FC<RecordingViewProps> = ({ onCancel, onSave }
         context: selectedContext || undefined,
         waveformData: recordedWaveform,
         favorite: false,
-        analysisStatus: analyzeNow ? 'pending' : 'none',
+        analysisStatus: analyzeNow ? 'analyzing' : 'idle',
         keepMelodyPct: 80,
         keepLyricPct: 70,
       };

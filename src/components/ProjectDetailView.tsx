@@ -1,25 +1,25 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   ArrowLeft,
-  Heart,
   Calendar,
   Sparkles,
   Sliders,
   FileText,
   Music,
-  Compass,
-  CheckCircle2,
   Lock,
-  Edit3,
-  Flame,
-  Layers,
   ChevronRight,
-  Disc3,
-  Mic,
   BrainCircuit,
   Save,
+  AlertCircle,
+  RotateCcw,
+  CheckCircle2,
+  Mic,
+  Volume2,
+  Lightbulb,
+  Radio,
+  Cpu,
 } from 'lucide-react';
-import { AudioIdea, AudioAnalysisResult } from '../types';
+import { AudioIdea, AudioAnalysisResult, InputClassification } from '../types';
 import { formatDateTime, formatDuration } from '../lib/formatters';
 import { AudioPlayer } from './AudioPlayer';
 import { defaultAudioAnalyzer } from '../lib/analysis';
@@ -41,11 +41,19 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
     idea.developedLyric || idea.originalLyric || ''
   );
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [isSavingLyrics, setIsSavingLyrics] = useState<boolean>(false);
 
   // Creative sliders
   const [keepMelodyPct, setKeepMelodyPct] = useState<number>(idea.keepMelodyPct ?? 80);
   const [keepLyricPct, setKeepLyricPct] = useState<number>(idea.keepLyricPct ?? 70);
+
+  // Trigger analysis if in pending or analyzing state
+  useEffect(() => {
+    if (currentIdea.analysisStatus === 'pending' || currentIdea.analysisStatus === 'analyzing') {
+      handleRunAnalysis();
+    }
+  }, []);
 
   const handleSliderChange = async (type: 'melody' | 'lyric', val: number) => {
     if (type === 'melody') {
@@ -71,6 +79,11 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
 
   const handleRunAnalysis = async () => {
     setIsAnalyzing(true);
+    setAnalysisError(null);
+
+    // Update status to analyzing
+    await onUpdateIdea(currentIdea.id, { analysisStatus: 'analyzing' });
+
     try {
       const result: AudioAnalysisResult = await defaultAudioAnalyzer.analyzeAudio(
         currentIdea.audioBlob,
@@ -82,18 +95,47 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
         originalLyric: result.originalLyric,
         developedLyric: currentIdea.developedLyric || result.developedLyric,
         emotion: result.emotion,
-        bpm: result.bpm,
-        musicalKey: result.musicalKey,
+        bpm: result.tempo,
+        musicalKey: result.key,
         melodyDescription: result.melodyDescription,
-        suggestedGenres: result.suggestedGenres,
+        suggestedGenres: result.genreSuggestions.map((g) => g.name),
+        genreSuggestions: result.genreSuggestions,
+        developmentIdeas: result.developmentIdeas,
+        confidence: result.confidence,
+        inputType: result.inputType,
+        hasSpeech: result.hasSpeech,
+        analyzedWith: result.analyzedWith,
+        needsAiConnectionFor: result.needsAiConnectionFor,
         analysisStatus: 'completed',
       };
 
-      setDevelopedLyric(currentIdea.developedLyric || result.developedLyric);
+      if (result.developedLyric && !currentIdea.developedLyric) {
+        setDevelopedLyric(result.developedLyric);
+      }
       const updated = await onUpdateIdea(currentIdea.id, updates);
+      setCurrentIdea(updated);
+    } catch (err: unknown) {
+      console.error('Analysis error:', err);
+      setAnalysisError('Bản ghi đã được lưu an toàn. AI chưa thể phân tích bản ghi này.');
+      const updated = await onUpdateIdea(currentIdea.id, { analysisStatus: 'error' });
       setCurrentIdea(updated);
     } finally {
       setIsAnalyzing(false);
+    }
+  };
+
+  const getInputTypeLabel = (type?: InputClassification) => {
+    switch (type) {
+      case 'singing_with_lyrics':
+        return 'Hát có lời';
+      case 'humming_melody':
+        return 'Ngâm giai điệu (Humming)';
+      case 'spoken_idea':
+        return 'Ý tưởng nói (Spoken note)';
+      case 'instrument_or_ambient':
+        return 'Nhạc cụ / Âm thanh tự do';
+      default:
+        return 'Giai điệu ngẫu hứng';
     }
   };
 
@@ -102,10 +144,10 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
     {
       label: 'AI hiểu',
       icon: '🧠',
-      status: currentIdea.analysisStatus === 'completed' ? 'completed' : 'ready',
+      status: currentIdea.analysisStatus === 'completed' ? 'completed' : isAnalyzing ? 'active' : 'ready',
     },
     { label: 'Lời', icon: '📝', status: currentIdea.originalLyric ? 'active' : 'upcoming' },
-    { label: 'Giai điệu', icon: '🎼', status: 'upcoming' },
+    { label: 'Giai điệu', icon: '🎼', status: currentIdea.musicalKey ? 'active' : 'upcoming' },
     { label: 'Bản phối', icon: '🎹', status: 'upcoming' },
     { label: 'Giọng hát', icon: '🎤', status: 'upcoming' },
     { label: 'Bài hát', icon: '🎧', status: 'upcoming' },
@@ -191,7 +233,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                     isDone
                       ? 'bg-purple-950/40 border-purple-500/40 text-purple-200'
                       : isActive
-                      ? 'bg-blue-950/50 border-blue-400/50 text-blue-200 shadow-xs shadow-blue-500/20'
+                      ? 'bg-blue-950/50 border-blue-400/50 text-blue-200 shadow-xs shadow-blue-500/20 animate-pulse'
                       : isReady
                       ? 'bg-slate-800/60 border-slate-700 text-slate-300'
                       : 'bg-slate-900/40 border-slate-800/60 text-slate-500 opacity-60'
@@ -202,7 +244,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                     {step.label}
                   </span>
                   <span className="text-[9px] mt-0.5 font-mono">
-                    {isDone ? 'Đã có' : isReady ? 'Khám phá' : 'Sắp có'}
+                    {isDone ? 'Đã có' : isActive ? 'Đang xử lý' : isReady ? 'Khám phá' : 'Sắp có'}
                   </span>
                 </div>
                 {idx < timelineSteps.length - 1 && (
@@ -214,7 +256,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
         </div>
       </div>
 
-      {/* AI Analysis Cards Section (📝 Lời, 🎼 Giai điệu, 💭 Cảm xúc, 🎹 Hướng âm nhạc) */}
+      {/* AI Analysis Cards Section (THẤU HIỂU Ý TƯỞNG) */}
       <div className="p-4 rounded-3xl bg-[#0F172A]/80 border border-slate-800/80 space-y-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -225,67 +267,206 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
               <h3 className="text-xs font-bold text-white uppercase tracking-wider">
                 Thấu hiểu ý tưởng (AI Analysis)
               </h3>
-              <p className="text-[10px] text-slate-400">Phân tích giai điệu & âm nhạc học</p>
+              <p className="text-[10px] text-slate-400">Phân tích từ file audio thực</p>
             </div>
           </div>
 
-          <button
-            onClick={handleRunAnalysis}
-            disabled={isAnalyzing}
-            className="py-1.5 px-3 rounded-xl bg-linear-to-r from-purple-600 to-pink-600 text-white text-xs font-semibold flex items-center gap-1.5 shadow-sm active:scale-95 transition-all disabled:opacity-50"
-          >
-            <Sparkles size={12} />
-            <span>{isAnalyzing ? 'Đang phân tích...' : currentIdea.analysisStatus === 'completed' ? 'Phân tích lại' : 'Phân tích'}</span>
-          </button>
+          {currentIdea.analysisStatus === 'completed' && (
+            <button
+              onClick={handleRunAnalysis}
+              disabled={isAnalyzing}
+              className="py-1 px-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-purple-300 text-xs font-semibold flex items-center gap-1 border border-slate-700 active:scale-95 transition-all disabled:opacity-50"
+            >
+              <RotateCcw size={12} />
+              <span>Phân tích lại</span>
+            </button>
+          )}
         </div>
 
-        {currentIdea.analysisStatus !== 'completed' ? (
-          <div className="p-4 rounded-2xl bg-slate-900/50 border border-dashed border-slate-800 text-center space-y-2">
-            <p className="text-xs text-slate-300">
-              Nhấn <strong>Phân tích</strong> để tự động cảm nhận cảm xúc, nhịp điệu (BPM), giọng (Key) và gợi ý ca từ từ bản thu gốc.
+        {/* STATE 1: ANALYZING */}
+        {isAnalyzing || currentIdea.analysisStatus === 'analyzing' ? (
+          <div className="p-6 rounded-2xl bg-linear-to-b from-purple-950/40 to-slate-900/90 border border-purple-800/50 text-center space-y-4 shadow-xl">
+            <div className="relative w-16 h-16 mx-auto flex items-center justify-center">
+              <div className="absolute inset-0 rounded-full bg-purple-500/20 animate-ping" />
+              <div className="w-14 h-14 rounded-full bg-linear-to-tr from-purple-600 to-pink-500 flex items-center justify-center text-white shadow-lg shadow-purple-500/30">
+                <Sparkles size={24} className="animate-pulse" />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-sm font-black tracking-wider text-white uppercase">
+                BẮT LẤY ĐANG LẮNG NGHE...
+              </h3>
+              <p className="text-xs text-purple-200/90 font-medium">
+                Đang tìm giai điệu, nhịp điệu và cảm xúc của bạn.
+              </p>
+            </div>
+            {/* Visual sound bars */}
+            <div className="flex items-center justify-center gap-1.5 py-1">
+              <div className="w-1.5 h-4 bg-purple-400 rounded-full animate-[pulse_1s_infinite_100ms]" />
+              <div className="w-1.5 h-8 bg-pink-400 rounded-full animate-[pulse_1s_infinite_200ms]" />
+              <div className="w-1.5 h-11 bg-blue-400 rounded-full animate-[pulse_1s_infinite_300ms]" />
+              <div className="w-1.5 h-7 bg-purple-300 rounded-full animate-[pulse_1s_infinite_400ms]" />
+              <div className="w-1.5 h-5 bg-pink-300 rounded-full animate-[pulse_1s_infinite_500ms]" />
+            </div>
+            <p className="text-[11px] text-slate-400 font-mono">
+              Giải mã cao độ và nhịp độ qua Web Audio DSP thực tế...
             </p>
           </div>
-        ) : (
-          <div className="grid grid-cols-2 gap-2 text-xs">
-            {/* 💭 Cảm xúc */}
-            <div className="p-3 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-1">
-              <span className="text-[10px] text-pink-400 font-semibold uppercase tracking-wider block">
-                💭 Cảm xúc
-              </span>
-              <p className="text-white font-medium">{currentIdea.emotion || 'Chưa xác định'}</p>
+        ) : currentIdea.analysisStatus === 'error' || analysisError ? (
+          /* STATE 2: ERROR / FALLBACK */
+          <div className="p-5 rounded-2xl bg-rose-950/30 border border-rose-800/40 text-center space-y-3">
+            <div className="w-10 h-10 rounded-2xl bg-rose-500/20 text-rose-300 flex items-center justify-center mx-auto">
+              <AlertCircle size={20} />
             </div>
-
-            {/* 🎼 Giai điệu & Nhịp độ */}
-            <div className="p-3 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-1">
-              <span className="text-[10px] text-blue-400 font-semibold uppercase tracking-wider block">
-                🎼 Nhịp & Giọng
-              </span>
-              <p className="text-white font-medium">
-                {currentIdea.bpm} BPM • {currentIdea.musicalKey}
+            <div className="space-y-1">
+              <p className="text-xs text-white font-semibold">
+                Bản ghi đã được lưu an toàn.
+              </p>
+              <p className="text-xs text-slate-300 leading-relaxed">
+                AI chưa thể phân tích bản ghi này.
               </p>
             </div>
-
-            {/* 🎹 Hướng âm nhạc */}
-            <div className="p-3 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-1 col-span-2">
-              <span className="text-[10px] text-purple-400 font-semibold uppercase tracking-wider block">
-                🎹 Hướng âm nhạc gợi ý
+            <button
+              onClick={handleRunAnalysis}
+              disabled={isAnalyzing}
+              className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold inline-flex items-center gap-2 border border-slate-700 transition-all active:scale-95"
+            >
+              <RotateCcw size={13} />
+              <span>Thử phân tích lại</span>
+            </button>
+          </div>
+        ) : currentIdea.analysisStatus === 'completed' ? (
+          /* STATE 3: SUCCESS - REAL AUDIO ANALYSIS RESULTS */
+          <div className="space-y-3 text-xs">
+            {/* Input Classification Badge & Provenance */}
+            <div className="flex items-center justify-between gap-2 p-2.5 rounded-2xl bg-slate-900/80 border border-slate-800 text-[11px]">
+              <div className="flex items-center gap-1.5 text-purple-300 font-medium">
+                <Mic size={13} />
+                <span>Loại ý tưởng: <strong>{getInputTypeLabel(currentIdea.inputType)}</strong></span>
+              </div>
+              <span className="px-2 py-0.5 rounded-full bg-purple-950/70 border border-purple-800/60 text-[10px] text-purple-300 font-mono">
+                Độ tin cậy: {Math.round((currentIdea.confidence || 0.7) * 100)}%
               </span>
-              <p className="text-slate-300 text-[11px] leading-relaxed">
-                {currentIdea.melodyDescription}
-              </p>
-              {currentIdea.suggestedGenres && (
-                <div className="flex flex-wrap gap-1 pt-1">
-                  {currentIdea.suggestedGenres.map((g, i) => (
-                    <span
-                      key={i}
-                      className="px-2 py-0.5 rounded-full bg-purple-950/70 border border-purple-800/60 text-[10px] text-purple-300"
-                    >
-                      {g}
-                    </span>
-                  ))}
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              {/* 💭 Cảm xúc */}
+              <div className="p-3 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-1">
+                <span className="text-[10px] text-pink-400 font-semibold uppercase tracking-wider block">
+                  💭 Cảm xúc
+                </span>
+                <p className="text-white font-medium text-[11px] leading-snug">
+                  {currentIdea.emotion || 'Chưa đủ dữ liệu'}
+                </p>
+              </div>
+
+              {/* 🎼 Giai điệu & Nhịp độ */}
+              <div className="p-3 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-1">
+                <span className="text-[10px] text-blue-400 font-semibold uppercase tracking-wider block">
+                  🎼 Nhịp & Giọng
+                </span>
+                <p className="text-white font-medium text-[11px] leading-snug">
+                  {currentIdea.bpm ? `${currentIdea.bpm} BPM` : 'Nhịp tự do'} • {currentIdea.musicalKey || 'Chưa đủ dữ liệu'}
+                </p>
+              </div>
+
+              {/* 🎹 Đường nét giai điệu thực tế */}
+              <div className="p-3 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-1 col-span-2">
+                <span className="text-[10px] text-emerald-400 font-semibold uppercase tracking-wider block">
+                  🎼 Đường nét giai điệu
+                </span>
+                <p className="text-slate-300 text-[11px] leading-relaxed">
+                  {currentIdea.melodyDescription || 'Chưa có phân tích đường nét giai điệu.'}
+                </p>
+              </div>
+
+              {/* 🎹 Hướng âm nhạc gợi ý */}
+              <div className="p-3 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-2 col-span-2">
+                <span className="text-[10px] text-purple-400 font-semibold uppercase tracking-wider block">
+                  🎹 Hướng âm nhạc gợi ý & Lý do
+                </span>
+                <div className="space-y-1.5">
+                  {currentIdea.genreSuggestions && currentIdea.genreSuggestions.length > 0 ? (
+                    currentIdea.genreSuggestions.map((g, i) => (
+                      <div key={i} className="p-2 rounded-xl bg-slate-950/60 border border-slate-800/80">
+                        <span className="font-semibold text-purple-300 block text-[11px]">
+                          • {g.name}
+                        </span>
+                        <p className="text-[10px] text-slate-400 leading-relaxed mt-0.5">
+                          {g.reason}
+                        </p>
+                      </div>
+                    ))
+                  ) : currentIdea.suggestedGenres && currentIdea.suggestedGenres.length > 0 ? (
+                    <div className="flex flex-wrap gap-1">
+                      {currentIdea.suggestedGenres.map((g, i) => (
+                        <span
+                          key={i}
+                          className="px-2 py-0.5 rounded-full bg-purple-950/70 border border-purple-800/60 text-[10px] text-purple-300"
+                        >
+                          {g}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-slate-500 text-[10px]">Chưa đủ dữ liệu gợi ý thể loại.</p>
+                  )}
+                </div>
+              </div>
+
+              {/* 💡 Ý tưởng phát triển sáng tác */}
+              {currentIdea.developmentIdeas && currentIdea.developmentIdeas.length > 0 && (
+                <div className="p-3 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-1.5 col-span-2">
+                  <span className="text-[10px] text-amber-400 font-semibold uppercase tracking-wider flex items-center gap-1">
+                    <Lightbulb size={12} />
+                    <span>Gợi ý phát triển từ chính bản thu</span>
+                  </span>
+                  <ul className="space-y-1 text-[11px] text-slate-300 list-disc list-inside">
+                    {currentIdea.developmentIdeas.map((ideaText, i) => (
+                      <li key={i} className="leading-relaxed">
+                        {ideaText}
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               )}
             </div>
+
+            {/* AI Architecture Transparency Notice */}
+            <div className="p-3 rounded-2xl bg-purple-950/20 border border-purple-900/30 space-y-1 text-[10px] text-slate-400">
+              <div className="flex items-center gap-1.5 text-purple-300 font-semibold">
+                <Cpu size={12} />
+                <span>Trạng thái phân tích âm thanh thực</span>
+              </div>
+              <p className="leading-relaxed">
+                Các chỉ số nhịp (BPM), gam giọng (Key) và đường nét giai điệu được tính toán trực tiếp từ tín hiệu âm thanh thực tế qua <strong>Web Audio DSP</strong> trên thiết bị của bạn.
+              </p>
+              {currentIdea.needsAiConnectionFor && currentIdea.needsAiConnectionFor.length > 0 && (
+                <div className="pt-1 text-slate-400">
+                  <span className="text-slate-300">Tính năng nâng cao khi gắn AI model (Gemini):</span>
+                  <ul className="list-disc list-inside pl-1 text-[9.5px] text-slate-400 mt-0.5 space-y-0.5">
+                    {currentIdea.needsAiConnectionFor.map((item, idx) => (
+                      <li key={idx}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          /* STATE 4: IDLE / NOT YET ANALYZED */
+          <div className="p-5 rounded-2xl bg-slate-900/50 border border-dashed border-slate-800 text-center space-y-3">
+            <p className="text-xs text-slate-300 leading-relaxed max-w-xs mx-auto">
+              Nhấn <strong>Phân tích</strong> để tự động cảm nhận cảm xúc, đo nhịp độ (BPM), gam giọng (Key) và đường nét giai điệu từ chính file âm thanh của bạn.
+            </p>
+            <button
+              onClick={handleRunAnalysis}
+              disabled={isAnalyzing}
+              className="py-2.5 px-5 rounded-2xl bg-linear-to-r from-purple-600 to-pink-600 text-white text-xs font-bold inline-flex items-center gap-2 shadow-md shadow-purple-900/40 active:scale-95 transition-all"
+            >
+              <Sparkles size={14} />
+              <span>Phân tích ý tưởng này</span>
+            </button>
           </div>
         )}
       </div>
@@ -347,7 +528,11 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
             <p className="text-xs text-slate-200 whitespace-pre-line leading-relaxed italic">
               {currentIdea.originalLyric ||
                 currentIdea.transcript ||
-                'Chưa có ca từ gốc. Hãy bấm "Phân tích" để AI lắng nghe lời thì thầm từ bản thu.'}
+                (currentIdea.inputType === 'humming_melody'
+                  ? 'Bản thu ngâm nga giai điệu không lời (Humming). BẮT LẤY tập trung phân tích cao độ và nhịp điệu của bạn thay vì ép thành ca từ.'
+                  : currentIdea.inputType === 'spoken_idea'
+                  ? 'Ý tưởng được thu âm bằng giọng nói. Bạn có thể tự do gieo vần cho giai điệu ở tab Phiên Bản Phát Triển.'
+                  : 'Bản ghi âm đã được lưu an toàn trên máy. Cần kết nối AI (Gemini Multimodal) để tự động nhận diện lời hát tiếng Việt.')}
             </p>
           </div>
         ) : (
