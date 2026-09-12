@@ -16,13 +16,16 @@ import {
   Mic,
   Volume2,
   Lightbulb,
-  Radio,
+  Key,
   Cpu,
+  Settings2,
 } from 'lucide-react';
 import { AudioIdea, AudioAnalysisResult, InputClassification } from '../types';
 import { formatDateTime, formatDuration } from '../lib/formatters';
 import { AudioPlayer } from './AudioPlayer';
 import { defaultAudioAnalyzer } from '../lib/analysis';
+import { hasApiKeyConfigured } from '../services/audioAnalysis/apiKeyStorage';
+import { AiSettingsModal } from './AiSettingsModal';
 
 interface ProjectDetailViewProps {
   idea: AudioIdea;
@@ -43,10 +46,21 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [isSavingLyrics, setIsSavingLyrics] = useState<boolean>(false);
+  const [isAiConnected, setIsAiConnected] = useState<boolean>(hasApiKeyConfigured());
+  const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
 
   // Creative sliders
   const [keepMelodyPct, setKeepMelodyPct] = useState<number>(idea.keepMelodyPct ?? 80);
   const [keepLyricPct, setKeepLyricPct] = useState<number>(idea.keepLyricPct ?? 70);
+
+  // Listen for API key changes in local storage
+  useEffect(() => {
+    const handleKeyChange = () => {
+      setIsAiConnected(hasApiKeyConfigured());
+    };
+    window.addEventListener('bat_lay_api_key_updated', handleKeyChange);
+    return () => window.removeEventListener('bat_lay_api_key_updated', handleKeyChange);
+  }, []);
 
   // Trigger analysis if in pending or analyzing state
   useEffect(() => {
@@ -116,8 +130,33 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
       setCurrentIdea(updated);
     } catch (err: unknown) {
       console.error('Analysis error:', err);
-      setAnalysisError('Bản ghi đã được lưu an toàn. AI chưa thể phân tích bản ghi này.');
-      const updated = await onUpdateIdea(currentIdea.id, { analysisStatus: 'error' });
+      // Preserve local DSP findings if present on the error object
+      const errorObj = err as { message?: string; dspResult?: AudioAnalysisResult };
+      const preservedDsp = errorObj.dspResult;
+
+      const fallbackUpdates: Partial<AudioIdea> = {
+        analysisStatus: 'error',
+        ...(preservedDsp
+          ? {
+              bpm: preservedDsp.tempo,
+              musicalKey: preservedDsp.key,
+              melodyDescription: preservedDsp.melodyDescription,
+              inputType: preservedDsp.inputType,
+              suggestedGenres: preservedDsp.genreSuggestions.map((g) => g.name),
+              genreSuggestions: preservedDsp.genreSuggestions,
+              analyzedWith: 'local_dsp',
+            }
+          : {}),
+      };
+
+      setAnalysisError(
+        errorObj.message?.includes('400')
+          ? 'API Key không hợp lệ. Vui lòng kiểm tra lại trong Cài đặt AI.'
+          : errorObj.message?.includes('429')
+          ? 'Đã vượt hạn mức gọi API (429). Vui lòng thử lại sau giây lát.'
+          : errorObj.message || 'AI chưa thể phân tích bản ghi này. Bản ghi gốc vẫn được bảo tồn.'
+      );
+      const updated = await onUpdateIdea(currentIdea.id, fallbackUpdates);
       setCurrentIdea(updated);
     } finally {
       setIsAnalyzing(false);
@@ -165,9 +204,20 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
           <span>Quay lại</span>
         </button>
 
-        <span className="text-[11px] font-mono uppercase tracking-wider text-purple-400 px-2.5 py-0.5 rounded-full bg-purple-950/60 border border-purple-800/40">
-          Dự án sáng tác
-        </span>
+        <div className="flex items-center gap-2">
+          {/* AI Status Badge */}
+          <button
+            onClick={() => setIsSettingsOpen(true)}
+            className={`flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-medium border transition-colors ${
+              isAiConnected
+                ? 'bg-purple-950/60 border-purple-700/50 text-purple-300 hover:bg-purple-900/60'
+                : 'bg-amber-950/50 border-amber-700/50 text-amber-300 hover:bg-amber-900/50'
+            }`}
+          >
+            <Key size={11} />
+            <span>{isAiConnected ? 'Gemini 2.5 Flash' : 'Chưa gắn AI Key'}</span>
+          </button>
+        </div>
       </div>
 
       {/* Main Title & Context Header */}
@@ -267,20 +317,34 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
               <h3 className="text-xs font-bold text-white uppercase tracking-wider">
                 Thấu hiểu ý tưởng (AI Analysis)
               </h3>
-              <p className="text-[10px] text-slate-400">Phân tích từ file audio thực</p>
+              <p className="text-[10px] text-slate-400">
+                {currentIdea.analyzedWith === 'hybrid'
+                  ? 'Web Audio DSP + Gemini 2.5 Flash'
+                  : 'Web Audio DSP trên thiết bị'}
+              </p>
             </div>
           </div>
 
-          {currentIdea.analysisStatus === 'completed' && (
+          <div className="flex items-center gap-1.5">
             <button
-              onClick={handleRunAnalysis}
-              disabled={isAnalyzing}
-              className="py-1 px-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-purple-300 text-xs font-semibold flex items-center gap-1 border border-slate-700 active:scale-95 transition-all disabled:opacity-50"
+              onClick={() => setIsSettingsOpen(true)}
+              className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors"
+              title="Cài đặt API Key"
+              aria-label="Cài đặt API Key"
             >
-              <RotateCcw size={12} />
-              <span>Phân tích lại</span>
+              <Settings2 size={13} />
             </button>
-          )}
+            {currentIdea.analysisStatus === 'completed' && (
+              <button
+                onClick={handleRunAnalysis}
+                disabled={isAnalyzing}
+                className="py-1 px-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-purple-300 text-xs font-semibold flex items-center gap-1 border border-slate-700 active:scale-95 transition-all disabled:opacity-50"
+              >
+                <RotateCcw size={12} />
+                <span>Phân tích lại</span>
+              </button>
+            )}
+          </div>
         </div>
 
         {/* STATE 1: ANALYZING */}
@@ -297,7 +361,9 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                 BẮT LẤY ĐANG LẮNG NGHE...
               </h3>
               <p className="text-xs text-purple-200/90 font-medium">
-                Đang tìm giai điệu, nhịp điệu và cảm xúc của bạn.
+                {isAiConnected
+                  ? 'Đang đo đạc DSP và gửi tới Gemini 2.5 Flash đa phương thức...'
+                  : 'Đang trích xuất nhịp, gam giọng và đường nét giai điệu trên thiết bị...'}
               </p>
             </div>
             {/* Visual sound bars */}
@@ -309,7 +375,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
               <div className="w-1.5 h-5 bg-pink-300 rounded-full animate-[pulse_1s_infinite_500ms]" />
             </div>
             <p className="text-[11px] text-slate-400 font-mono">
-              Giải mã cao độ và nhịp độ qua Web Audio DSP thực tế...
+              Phân tích tín hiệu âm thanh trực tiếp từ bản thu của bạn...
             </p>
           </div>
         ) : currentIdea.analysisStatus === 'error' || analysisError ? (
@@ -322,18 +388,28 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
               <p className="text-xs text-white font-semibold">
                 Bản ghi đã được lưu an toàn.
               </p>
-              <p className="text-xs text-slate-300 leading-relaxed">
-                AI chưa thể phân tích bản ghi này.
+              <p className="text-xs text-rose-200/90 leading-relaxed font-medium">
+                {analysisError || 'AI chưa thể phân tích bản ghi này.'}
               </p>
             </div>
-            <button
-              onClick={handleRunAnalysis}
-              disabled={isAnalyzing}
-              className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold inline-flex items-center gap-2 border border-slate-700 transition-all active:scale-95"
-            >
-              <RotateCcw size={13} />
-              <span>Thử phân tích lại</span>
-            </button>
+
+            <div className="flex items-center justify-center gap-2 pt-1 flex-wrap">
+              <button
+                onClick={handleRunAnalysis}
+                disabled={isAnalyzing}
+                className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-all active:scale-95"
+              >
+                <RotateCcw size={13} />
+                <span>Thử phân tích lại</span>
+              </button>
+              <button
+                onClick={() => setIsSettingsOpen(true)}
+                className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium inline-flex items-center gap-1.5 border border-slate-700"
+              >
+                <Key size={13} />
+                <span>Kiểm tra API Key</span>
+              </button>
+            </div>
           </div>
         ) : currentIdea.analysisStatus === 'completed' ? (
           /* STATE 3: SUCCESS - REAL AUDIO ANALYSIS RESULTS */
@@ -344,9 +420,18 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                 <Mic size={13} />
                 <span>Loại ý tưởng: <strong>{getInputTypeLabel(currentIdea.inputType)}</strong></span>
               </div>
-              <span className="px-2 py-0.5 rounded-full bg-purple-950/70 border border-purple-800/60 text-[10px] text-purple-300 font-mono">
-                Độ tin cậy: {Math.round((currentIdea.confidence || 0.7) * 100)}%
-              </span>
+              <div className="flex items-center gap-1.5">
+                {currentIdea.analyzedWith === 'hybrid' ? (
+                  <span className="px-2 py-0.5 rounded-full bg-emerald-950/70 border border-emerald-800/60 text-[10px] text-emerald-300 font-mono flex items-center gap-1">
+                    <Sparkles size={9} />
+                    Gemini 2.5 AI
+                  </span>
+                ) : (
+                  <span className="px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-[10px] text-slate-300 font-mono">
+                    DSP Cục bộ
+                  </span>
+                )}
+              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-2">
@@ -432,41 +517,81 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
               )}
             </div>
 
-            {/* AI Architecture Transparency Notice */}
-            <div className="p-3 rounded-2xl bg-purple-950/20 border border-purple-900/30 space-y-1 text-[10px] text-slate-400">
-              <div className="flex items-center gap-1.5 text-purple-300 font-semibold">
-                <Cpu size={12} />
-                <span>Trạng thái phân tích âm thanh thực</span>
-              </div>
-              <p className="leading-relaxed">
-                Các chỉ số nhịp (BPM), gam giọng (Key) và đường nét giai điệu được tính toán trực tiếp từ tín hiệu âm thanh thực tế qua <strong>Web Audio DSP</strong> trên thiết bị của bạn.
-              </p>
-              {currentIdea.needsAiConnectionFor && currentIdea.needsAiConnectionFor.length > 0 && (
-                <div className="pt-1 text-slate-400">
-                  <span className="text-slate-300">Tính năng nâng cao khi gắn AI model (Gemini):</span>
-                  <ul className="list-disc list-inside pl-1 text-[9.5px] text-slate-400 mt-0.5 space-y-0.5">
-                    {currentIdea.needsAiConnectionFor.map((item, idx) => (
-                      <li key={idx}>{item}</li>
-                    ))}
-                  </ul>
+            {/* AI Connection State / Architecture Transparency */}
+            {!isAiConnected ? (
+              <div className="p-3.5 rounded-2xl bg-amber-950/30 border border-amber-800/40 space-y-2 text-[11px]">
+                <div className="flex items-center justify-between">
+                  <span className="text-amber-300 font-bold flex items-center gap-1.5">
+                    <Key size={13} />
+                    <span>AI chưa được kết nối</span>
+                  </span>
+                  <button
+                    onClick={() => setIsSettingsOpen(true)}
+                    className="px-2.5 py-1 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/40 font-semibold transition-colors"
+                  >
+                    Kết nối Gemini API
+                  </button>
                 </div>
-              )}
-            </div>
+                <p className="text-slate-300 text-[10.5px] leading-relaxed">
+                  Bản phân tích hiện tại được tính toán bằng bộ xử lý DSP cục bộ trên thiết bị. Để tự động nhận diện lời hát tiếng Việt và phát triển ca từ bằng Gemini 2.5 Flash, bạn có thể kết nối API Key cá nhân của mình.
+                </p>
+              </div>
+            ) : (
+              <div className="p-3 rounded-2xl bg-purple-950/20 border border-purple-900/30 space-y-1 text-[10px] text-slate-400">
+                <div className="flex items-center justify-between text-purple-300 font-semibold">
+                  <div className="flex items-center gap-1.5">
+                    <Cpu size={12} />
+                    <span>Bản thu đã được đồng bộ với Gemini 2.5 Flash</span>
+                  </div>
+                  <button
+                    onClick={() => setIsSettingsOpen(true)}
+                    className="text-purple-400 hover:underline"
+                  >
+                    Quản lý Key
+                  </button>
+                </div>
+                <p className="leading-relaxed text-[10.5px]">
+                  BPM, Key và đường nét cao độ do DSP đo đạc. Nhận diện ca từ tiếng Việt, cảm xúc và gợi ý phát triển do Gemini 2.5 Flash xử lý trực tiếp.
+                </p>
+              </div>
+            )}
           </div>
         ) : (
           /* STATE 4: IDLE / NOT YET ANALYZED */
           <div className="p-5 rounded-2xl bg-slate-900/50 border border-dashed border-slate-800 text-center space-y-3">
+            {!isAiConnected && (
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-950/50 border border-amber-700/50 text-[11px] text-amber-300 mb-1">
+                <Key size={11} />
+                <span>AI chưa được kết nối</span>
+              </div>
+            )}
+
             <p className="text-xs text-slate-300 leading-relaxed max-w-xs mx-auto">
-              Nhấn <strong>Phân tích</strong> để tự động cảm nhận cảm xúc, đo nhịp độ (BPM), gam giọng (Key) và đường nét giai điệu từ chính file âm thanh của bạn.
+              {isAiConnected
+                ? 'Nhấn để bắt đầu phân tích nhịp độ, gam giọng bằng Web Audio DSP và lắng nghe nhận diện lời hát với Gemini 2.5 Flash.'
+                : 'BẮT LẤY có thể đo nhịp (BPM) và gam giọng bằng DSP trên máy. Bạn có thể kết nối Gemini API cá nhân để nhận diện lời hát và phát triển ca từ.'}
             </p>
-            <button
-              onClick={handleRunAnalysis}
-              disabled={isAnalyzing}
-              className="py-2.5 px-5 rounded-2xl bg-linear-to-r from-purple-600 to-pink-600 text-white text-xs font-bold inline-flex items-center gap-2 shadow-md shadow-purple-900/40 active:scale-95 transition-all"
-            >
-              <Sparkles size={14} />
-              <span>Phân tích ý tưởng này</span>
-            </button>
+
+            <div className="flex items-center justify-center gap-2 pt-1 flex-wrap">
+              <button
+                onClick={handleRunAnalysis}
+                disabled={isAnalyzing}
+                className="py-2.5 px-5 rounded-2xl bg-linear-to-r from-purple-600 to-pink-600 text-white text-xs font-bold inline-flex items-center gap-2 shadow-md shadow-purple-900/40 active:scale-95 transition-all"
+              >
+                <Sparkles size={14} />
+                <span>{isAiConnected ? 'Phân tích với Gemini 2.5 Flash' : 'Phân tích ý tưởng này'}</span>
+              </button>
+
+              {!isAiConnected && (
+                <button
+                  onClick={() => setIsSettingsOpen(true)}
+                  className="py-2.5 px-4 rounded-2xl bg-slate-800 hover:bg-slate-700 text-purple-300 text-xs font-medium inline-flex items-center gap-1.5 border border-slate-700 transition-colors"
+                >
+                  <Key size={13} />
+                  <span>Cài đặt API Key</span>
+                </button>
+              )}
+            </div>
           </div>
         )}
       </div>
@@ -532,7 +657,9 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                   ? 'Bản thu ngâm nga giai điệu không lời (Humming). BẮT LẤY tập trung phân tích cao độ và nhịp điệu của bạn thay vì ép thành ca từ.'
                   : currentIdea.inputType === 'spoken_idea'
                   ? 'Ý tưởng được thu âm bằng giọng nói. Bạn có thể tự do gieo vần cho giai điệu ở tab Phiên Bản Phát Triển.'
-                  : 'Bản ghi âm đã được lưu an toàn trên máy. Cần kết nối AI (Gemini Multimodal) để tự động nhận diện lời hát tiếng Việt.')}
+                  : !isAiConnected
+                  ? 'Bản ghi âm đã được lưu an toàn trên máy. Kết nối Gemini API (BYOK) để tự động nhận diện lời hát tiếng Việt.'
+                  : 'Chưa phát hiện lời hát rõ rệt trong đoạn thu âm này.')}
             </p>
           </div>
         ) : (
@@ -621,6 +748,13 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
           Trạng thái: Sắp có
         </span>
       </div>
+
+      {/* AI Settings Modal */}
+      <AiSettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        onKeyChanged={() => setIsAiConnected(hasApiKeyConfigured())}
+      />
     </div>
   );
 };

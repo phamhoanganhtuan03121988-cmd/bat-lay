@@ -19,24 +19,25 @@ export class CompositeAudioAnalysisProvider implements AudioAnalysisProvider {
       throw new Error('Không có dữ liệu âm thanh hợp lệ để phân tích.');
     }
 
-    try {
-      // 1. Run real Web Audio DSP directly on the user's recorded Blob
-      const dspResult = await analyzeAudioWithLocalDSP(blob, duration);
+    // 1. ALWAYS run real Web Audio DSP directly on the user's recorded Blob
+    const dspResult = await analyzeAudioWithLocalDSP(blob, duration);
 
-      // 2. If external Gemini AI is connected, enrich with speech recognition & lyric writing
-      if (this.isAiConnected()) {
-        try {
-          return await this.geminiProvider.analyzeAudio(blob, duration);
-        } catch (aiErr) {
-          console.warn('AI enhancement error, continuing with local DSP result:', aiErr);
-        }
+    // 2. If Gemini BYOK is connected, enrich with Multimodal Gemini 2.5 Flash
+    if (this.isAiConnected()) {
+      try {
+        const enrichedResult = await this.geminiProvider.analyzeWithDSP(blob, duration, dspResult);
+        return enrichedResult;
+      } catch (aiErr) {
+        console.warn('Gemini AI enrichment failed, returning local DSP with error flag:', aiErr);
+        // Throw specific error with partial DSP data preserved so UI can show error state while keeping DSP
+        const error = new Error(aiErr instanceof Error ? aiErr.message : 'Lỗi kết nối Gemini AI');
+        (error as unknown as { dspResult: AudioAnalysisResult }).dspResult = dspResult;
+        throw error;
       }
-
-      return dspResult;
-    } catch (error) {
-      console.error('Audio analysis pipeline failed:', error);
-      throw error;
     }
+
+    // 3. If Gemini is not connected, return local DSP result with clear notice
+    return dspResult;
   }
 }
 

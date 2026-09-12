@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Wifi, Battery } from 'lucide-react';
+import { Wifi, Battery, Key } from 'lucide-react';
 import { NavigationTab, AudioIdea } from './types';
 import {
   getAllIdeas,
@@ -17,6 +17,8 @@ import { InspirationScreen } from './components/InspirationScreen';
 import { VoiceScreen } from './components/VoiceScreen';
 import { RecordingView } from './components/RecordingView';
 import { SafariGuideModal } from './components/SafariGuideModal';
+import { AiSettingsModal } from './components/AiSettingsModal';
+import { hasApiKeyConfigured } from './services/audioAnalysis/apiKeyStorage';
 
 export default function App() {
   const [currentTab, setCurrentTab] = useState<NavigationTab>('home');
@@ -24,8 +26,10 @@ export default function App() {
   const [selectedIdea, setSelectedIdea] = useState<AudioIdea | null>(null);
   const [isRecordingOpen, setIsRecordingOpen] = useState<boolean>(false);
   const [isPwaGuideOpen, setIsPwaGuideOpen] = useState<boolean>(false);
+  const [isAiSettingsOpen, setIsAiSettingsOpen] = useState<boolean>(false);
   const [isSimulatorMode, setIsSimulatorMode] = useState<boolean>(true);
   const [currentTime, setCurrentTime] = useState<string>('9:41');
+  const [hasAiKey, setHasAiKey] = useState<boolean>(hasApiKeyConfigured());
 
   // Load all ideas from IndexedDB
   const refreshIdeas = useCallback(async () => {
@@ -40,6 +44,15 @@ export default function App() {
   useEffect(() => {
     refreshIdeas();
   }, [refreshIdeas]);
+
+  // Reactive listener for API key changes
+  useEffect(() => {
+    const handleKeyChange = () => {
+      setHasAiKey(hasApiKeyConfigured());
+    };
+    window.addEventListener('bat_lay_api_key_updated', handleKeyChange);
+    return () => window.removeEventListener('bat_lay_api_key_updated', handleKeyChange);
+  }, []);
 
   // Live status bar clock
   useEffect(() => {
@@ -118,6 +131,17 @@ export default function App() {
         <header className="pt-safe px-6 py-2 flex items-center justify-between text-xs font-semibold text-slate-300 select-none bg-[#070B14]/80 backdrop-blur-md sticky top-0 z-30 border-b border-slate-900/60">
           <span className="tracking-tight text-white font-mono">{currentTime}</span>
           <div className="flex items-center gap-2 text-slate-400">
+            <button
+              onClick={() => setIsAiSettingsOpen(true)}
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded-md hover:bg-slate-800 transition-colors"
+              title="Cài đặt Gemini AI (BYOK)"
+              aria-label="Cài đặt Gemini AI"
+            >
+              <Key size={11} className={hasAiKey ? 'text-emerald-400' : 'text-slate-500'} />
+              <span className={`text-[10px] font-mono ${hasAiKey ? 'text-emerald-300' : 'text-slate-500'}`}>
+                {hasAiKey ? 'AI' : 'BYOK'}
+              </span>
+            </button>
             <Wifi size={13} className="text-slate-300" />
             <span className="text-[10px] font-mono tracking-tighter text-slate-300">5G</span>
             <Battery size={15} className="text-slate-200 fill-slate-200" />
@@ -139,6 +163,7 @@ export default function App() {
               onOpenIdea={(idea) => setSelectedIdea(idea)}
               onViewAllLibrary={() => setCurrentTab('library')}
               onOpenPwaGuide={() => setIsPwaGuideOpen(true)}
+              onOpenAiSettings={() => setIsAiSettingsOpen(true)}
             />
           ) : currentTab === 'library' ? (
             <LibraryScreen
@@ -179,6 +204,13 @@ export default function App() {
         <SafariGuideModal
           isOpen={isPwaGuideOpen}
           onClose={() => setIsPwaGuideOpen(false)}
+        />
+
+        {/* AI BYOK Settings Modal */}
+        <AiSettingsModal
+          isOpen={isAiSettingsOpen}
+          onClose={() => setIsAiSettingsOpen(false)}
+          onKeyChanged={() => setHasAiKey(hasApiKeyConfigured())}
         />
       </div>
     </IPhoneFrame>
