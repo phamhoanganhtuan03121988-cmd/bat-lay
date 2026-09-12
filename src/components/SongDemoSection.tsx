@@ -2,7 +2,6 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   Play,
   Pause,
-  RotateCcw,
   Sparkles,
   Volume2,
   VolumeX,
@@ -19,6 +18,12 @@ import {
   Info,
   Bug,
   HelpCircle,
+  ShieldAlert,
+  XCircle,
+  Wrench,
+  SearchCode,
+  ArrowRight,
+  ExternalLink,
 } from 'lucide-react';
 import {
   AudioIdea,
@@ -27,12 +32,22 @@ import {
   GenerationType,
   LYRIA_CLIP_ESTIMATED_COST,
   LYRIA_FULL_ESTIMATED_COST,
+  DiagnosticTestId,
+  DiagnosticTestResult,
 } from '../types';
 import {
   createMusicBlueprint,
   generateLyriaAudio,
   LyriaApiError,
 } from '../services/audioAnalysis/lyriaService';
+import {
+  runLyriaDiagnosticTest,
+  getDiagnosticConclusion,
+  DIAGNOSTIC_MODEL,
+  TEST_A_MINIMAL_PROMPT,
+  buildTestBPrompt,
+  buildTestCPrompt,
+} from '../services/musicGeneration/lyriaPromptDiagnostic';
 import { saveGeneratedSong, switchGeneratedSong, createIdeaVersion } from '../lib/db';
 
 interface SongDemoSectionProps {
@@ -88,6 +103,22 @@ export const SongDemoSection: React.FC<SongDemoSectionProps> = ({
   const activeSong =
     generatedSongs.find((s) => s.id === idea.activeGeneratedSongId) ||
     (generatedSongs.length > 0 ? generatedSongs[generatedSongs.length - 1] : null);
+
+  // Diagnostic State (V3.2)
+  const [diagnosticResults, setDiagnosticResults] = useState<
+    Partial<Record<DiagnosticTestId, DiagnosticTestResult | null>>
+  >({});
+  const [runningTestId, setRunningTestId] = useState<DiagnosticTestId | null>(null);
+  const [diagnosticModalTest, setDiagnosticModalTest] = useState<DiagnosticTestId | null>(null);
+  const [showDiagPrompt, setShowDiagPrompt] = useState<Partial<Record<DiagnosticTestId, boolean>>>({});
+  const [showDiagError, setShowDiagError] = useState<Partial<Record<DiagnosticTestId, boolean>>>({});
+  const [diagnosticAudioUrl, setDiagnosticAudioUrl] = useState<{
+    testId: DiagnosticTestId;
+    url: string;
+  } | null>(null);
+
+  const diagnosticAudioRef = useRef<HTMLAudioElement | null>(null);
+  const [isDiagPlaying, setIsDiagPlaying] = useState(false);
 
   // Setup audio URL from blob
   useEffect(() => {
@@ -178,7 +209,7 @@ export const SongDemoSection: React.FC<SongDemoSectionProps> = ({
   };
 
   /**
-   * Main Execution: Create Music Blueprint then call Lyria
+   * Main Production Generation: Create Music Blueprint then call Lyria
    * ONLY triggered after User explicitly confirms in modal!
    * NO automatic retries!
    */
@@ -207,10 +238,9 @@ export const SongDemoSection: React.FC<SongDemoSectionProps> = ({
       // Step 2: Generating Audio with Lyria
       setStatus(genType === 'clip' ? 'generating_clip' : 'generating_full');
 
-      const existingCount = idea.generatedSongs?.length || 0;
       const versionName =
         genType === 'clip'
-          ? `Clip 30s #${idea.generatedSongs?.filter((s) => s.generationType === 'clip').length + 1 || 1}`
+          ? `Clip 30s #${(idea.generatedSongs?.filter((s) => s.generationType === 'clip').length || 0) + 1}`
           : `Demo ${((idea.generatedSongs?.filter((s) => s.generationType !== 'clip').length || 0) + 1)
               .toString()
               .padStart(2, '0')}`;
@@ -253,6 +283,92 @@ export const SongDemoSection: React.FC<SongDemoSectionProps> = ({
   };
 
   /**
+   * Diagnostic Test Runner (V3.2):
+   * Strictly calls lyria-3-clip-preview (~$0.04).
+   * Never mutates Music Blueprint or original recording.
+   */
+  const handleExecuteDiagnosticTest = async (testId: DiagnosticTestId) => {
+    setDiagnosticModalTest(null);
+    setRunningTestId(testId);
+
+    // Stop any playing audio
+    if (audioRef.current && isPlaying) {
+      audioRef.current.pause();
+      setIsPlaying(false);
+    }
+    if (diagnosticAudioRef.current && isDiagPlaying) {
+      diagnosticAudioRef.current.pause();
+      setIsDiagPlaying(false);
+    }
+
+    try {
+      // Ensure blueprint exists for Test C
+      let blueprint = currentBlueprint;
+      if (testId === 'test_c' && !blueprint) {
+        blueprint = await createMusicBlueprint(idea);
+        setCurrentBlueprint(blueprint);
+      }
+
+      const result = await runLyriaDiagnosticTest({
+        testId,
+        idea,
+        blueprint,
+      });
+
+      setDiagnosticResults((prev) => ({
+        ...prev,
+        [testId]: result,
+      }));
+
+      // Setup audio preview if test produced audio
+      if (result.outcome === 'pass' && result.audioBlob) {
+        const url = URL.createObjectURL(result.audioBlob);
+        setDiagnosticAudioUrl({ testId, url });
+      }
+
+      if (onNotify) {
+        if (result.outcome === 'pass') {
+          onNotify(`Hoàn thành ${result.testName}: PASS (Hợp lệ)`, 'success');
+        } else if (result.outcome === 'blocked') {
+          onNotify(`Hoàn thành ${result.testName}: BLOCKED (Bị từ chối)`, 'error');
+        } else {
+          onNotify(`Hoàn thành ${result.testName}: ERROR`, 'warning');
+        }
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setDiagnosticResults((prev) => ({
+        ...prev,
+        [testId]: {
+          testId,
+          testName: `Test ${testId.toUpperCase()}`,
+          outcome: 'error',
+          model: DIAGNOSTIC_MODEL,
+          exactPrompt: '',
+          timestamp: Date.now(),
+          errorSummary: msg,
+          rawErrorDetails: msg,
+        },
+      }));
+    } finally {
+      setRunningTestId(null);
+    }
+  };
+
+  const toggleDiagnosticPlay = () => {
+    if (!diagnosticAudioRef.current || !diagnosticAudioUrl) return;
+    if (isDiagPlaying) {
+      diagnosticAudioRef.current.pause();
+      setIsDiagPlaying(false);
+    } else {
+      diagnosticAudioRef.current
+        .play()
+        .then(() => setIsDiagPlaying(true))
+        .catch((e) => console.error('Diag audio play error:', e));
+    }
+  };
+
+  /**
    * Switch between previously generated demos
    */
   const handleSelectDemo = async (songId: string) => {
@@ -289,6 +405,8 @@ export const SongDemoSection: React.FC<SongDemoSectionProps> = ({
     }
   };
 
+  const diagnosticConclusion = getDiagnosticConclusion(diagnosticResults);
+
   return (
     <div
       id="bat-lay-v3-demo-section"
@@ -297,7 +415,7 @@ export const SongDemoSection: React.FC<SongDemoSectionProps> = ({
       {/* Background ambient lighting */}
       <div className="absolute -top-24 -right-24 w-72 h-72 bg-gradient-to-br from-purple-600/10 via-pink-600/5 to-transparent rounded-full blur-3xl pointer-events-none" />
 
-      {/* Hidden HTML5 Audio Element */}
+      {/* Hidden HTML5 Audio Element for Main Songs */}
       {audioUrl && (
         <audio
           ref={audioRef}
@@ -305,6 +423,15 @@ export const SongDemoSection: React.FC<SongDemoSectionProps> = ({
           onTimeUpdate={handleTimeUpdate}
           onLoadedMetadata={handleLoadedMetadata}
           onEnded={handleEnded}
+        />
+      )}
+
+      {/* Hidden HTML5 Audio Element for Diagnostic Audio */}
+      {diagnosticAudioUrl && (
+        <audio
+          ref={diagnosticAudioRef}
+          src={diagnosticAudioUrl.url}
+          onEnded={() => setIsDiagPlaying(false)}
         />
       )}
 
@@ -317,7 +444,7 @@ export const SongDemoSection: React.FC<SongDemoSectionProps> = ({
             </div>
             <div>
               <h3 className="text-sm sm:text-base font-black text-white tracking-wide uppercase">
-                BẢN DEMO BÀI HÁT (LYRIA V3.1)
+                BẢN DEMO BÀI HÁT (LYRIA V3.2)
               </h3>
               <p className="text-[11px] text-purple-300">
                 Biến ý tưởng sáng tác thành bản nhạc có âm thanh thật
@@ -354,7 +481,15 @@ export const SongDemoSection: React.FC<SongDemoSectionProps> = ({
         </div>
       </div>
 
-      {/* 2 NÚT BẤM RIÊNG BIỆT KÈM CHI PHÍ RÕ RÀNG (Yêu cầu 2B & 2C) */}
+      {/* COPYRIGHT / RECITATION SAFETY WARNING (YÊU CẦU 8) */}
+      <div className="p-3 rounded-2xl bg-amber-950/30 border border-amber-800/40 text-xs text-amber-200/90 flex items-start gap-2.5">
+        <ShieldAlert size={15} className="text-amber-400 shrink-0 mt-0.5" />
+        <p className="text-[11px] leading-relaxed">
+          <strong>Lưu ý về bản quyền ca từ:</strong> Lời ca sẽ được gửi tới Lyria để tạo nhạc. Nếu nội dung trùng hoặc quá giống lyrics đã đăng ký bản quyền của các tác phẩm âm nhạc nổi tiếng, bộ lọc an toàn của Google Lyria có thể từ chối tạo bài hát.
+        </p>
+      </div>
+
+      {/* 2 NÚT BẤM RIÊNG BIỆT KÈM CHI PHÍ RÕ RÀNG */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         {/* Nút 1: Nghe thử 30s */}
         <div className="p-3.5 rounded-2xl bg-slate-950/60 border border-slate-800/90 hover:border-purple-600/40 transition-all flex flex-col justify-between space-y-2.5">
@@ -380,7 +515,7 @@ export const SongDemoSection: React.FC<SongDemoSectionProps> = ({
             <button
               id="btn-trigger-clip-preview"
               onClick={() => setConfirmModalType('clip')}
-              disabled={status === 'generating_clip' || status === 'generating_full' || status === 'preparing_blueprint'}
+              disabled={status === 'generating_clip' || status === 'generating_full' || status === 'preparing_blueprint' || runningTestId !== null}
               className="px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white text-xs font-bold shadow-md shadow-purple-900/40 active:scale-95 transition-all inline-flex items-center gap-1.5 cursor-pointer"
             >
               <Headphones size={13} />
@@ -413,7 +548,7 @@ export const SongDemoSection: React.FC<SongDemoSectionProps> = ({
             <button
               id="btn-trigger-full-song"
               onClick={() => setConfirmModalType('full')}
-              disabled={status === 'generating_clip' || status === 'generating_full' || status === 'preparing_blueprint'}
+              disabled={status === 'generating_clip' || status === 'generating_full' || status === 'preparing_blueprint' || runningTestId !== null}
               className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-500 hover:to-purple-500 disabled:opacity-50 text-white text-xs font-bold shadow-md shadow-pink-900/40 active:scale-95 transition-all inline-flex items-center gap-1.5 cursor-pointer"
             >
               <Sparkles size={13} />
@@ -664,7 +799,7 @@ export const SongDemoSection: React.FC<SongDemoSectionProps> = ({
         </div>
       )}
 
-      {/* STATE 5: XỬ LÝ LỖI (ERROR HANDLING - TUÂN THỦ MỤC 9) */}
+      {/* STATE 5: XỬ LÝ LỖI — TUÂN THỦ NGHIÊM NGẶT YÊU CẦU 2 (KHÔNG CHO RETRY VÔ TỘI VẠ) */}
       {status === 'error' && (
         <div className="p-4 sm:p-5 rounded-2xl bg-rose-950/40 border border-rose-800/60 space-y-3">
           <div className="flex items-start gap-3">
@@ -672,9 +807,9 @@ export const SongDemoSection: React.FC<SongDemoSectionProps> = ({
               <AlertCircle size={20} />
             </div>
             <div className="space-y-1.5 flex-1 min-w-0">
-              <h4 className="text-xs sm:text-sm font-bold text-rose-200">
+              <h4 className="text-xs sm:text-sm font-black tracking-wide text-rose-200 uppercase">
                 {errorCode === 'POLICY_BLOCKED'
-                  ? 'LYRIA KHÔNG THỂ TẠO BẢN NHẠC'
+                  ? 'LYRIA TỪ CHỐI PROMPT'
                   : errorCode === 'BILLING'
                   ? 'CHƯA THỂ TẠO NHẠC VÌ QUYỀN TRUY CẬP (BILLING)'
                   : errorCode === 'AUTH'
@@ -684,10 +819,21 @@ export const SongDemoSection: React.FC<SongDemoSectionProps> = ({
                   : 'CHƯA THỂ TẠO BẢN DEMO'}
               </h4>
 
-              <p className="text-xs text-rose-200/90 leading-relaxed">
-                {errorMessage ||
-                  'Prompt âm nhạc này chưa được chấp nhận bởi hệ thống. Bản thu gốc và Music Blueprint của bạn vẫn được giữ nguyên an toàn.'}
-              </p>
+              {errorCode === 'POLICY_BLOCKED' ? (
+                <div className="space-y-1">
+                  <p className="text-xs font-bold text-rose-300">
+                    Đừng thử lại cùng một prompt. Hãy kiểm tra phần nội dung bị từ chối.
+                  </p>
+                  <p className="text-[11.5px] text-rose-200/90 leading-relaxed">
+                    Hệ thống an toàn / recitation của Google Lyria đã chặn request này. Vui lòng sử dụng công cụ chẩn đoán bên dưới để xác định chính xác nguyên nhân (do cấu trúc request, do lyrics hay do music direction).
+                  </p>
+                </div>
+              ) : (
+                <p className="text-xs text-rose-200/90 leading-relaxed">
+                  {errorMessage ||
+                    'Prompt âm nhạc này chưa được chấp nhận bởi hệ thống. Bản thu gốc và Music Blueprint của bạn vẫn được giữ nguyên an toàn.'}
+                </p>
+              )}
 
               <p className="text-[11px] text-emerald-300 flex items-center gap-1 font-medium pt-0.5">
                 <CheckCircle2 size={12} className="text-emerald-400" />
@@ -698,12 +844,25 @@ export const SongDemoSection: React.FC<SongDemoSectionProps> = ({
 
           {/* Action buttons & View Error Details */}
           <div className="flex items-center gap-2 pt-2 border-t border-rose-900/40 flex-wrap">
-            <button
-              onClick={() => setConfirmModalType('clip')}
-              className="px-3.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition-all cursor-pointer active:scale-95"
-            >
-              Thử lại với Clip 30s (~$0.04)
-            </button>
+            {/* TUYỆT ĐỐI KHÔNG HIỂN THỊ NÚT RETRY BỪA BÃI NẾU LÀ POLICY_BLOCKED */}
+            {errorCode !== 'POLICY_BLOCKED' && (
+              <button
+                onClick={() => setConfirmModalType('clip')}
+                className="px-3.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition-all cursor-pointer active:scale-95"
+              >
+                Thử lại với Clip 30s (~$0.04)
+              </button>
+            )}
+
+            {errorCode === 'POLICY_BLOCKED' && (
+              <a
+                href="#bat-lay-diagnostic-section"
+                className="px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition-all cursor-pointer active:scale-95 inline-flex items-center gap-1.5"
+              >
+                <SearchCode size={13} />
+                <span>Dùng công cụ chẩn đoán để tìm nguyên nhân</span>
+              </a>
+            )}
 
             {rawErrorDetails && (
               <button
@@ -749,7 +908,433 @@ export const SongDemoSection: React.FC<SongDemoSectionProps> = ({
         </div>
       )}
 
-      {/* CONFIRMATION MODAL CHO CLIP 30S (Yêu cầu 8) */}
+      {/* ========================================================================= */}
+      {/* KHU VỰC DEBUG: KIỂM TRA LYRIA (DIAGNOSTIC PIPELINE - YÊU CẦU 1, 4, 9, 10) */}
+      {/* ========================================================================= */}
+      <div
+        id="bat-lay-diagnostic-section"
+        className="p-4 sm:p-5 rounded-2xl bg-slate-950/90 border border-purple-500/40 space-y-4 shadow-lg"
+      >
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2.5 border-b border-slate-800">
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-lg bg-purple-500/20 text-purple-300 flex items-center justify-center">
+              <Wrench size={15} />
+            </div>
+            <div>
+              <h4 className="text-xs sm:text-sm font-black text-white uppercase tracking-wider">
+                KIỂM TRA LYRIA (DIAGNOSTIC PIPELINE)
+              </h4>
+              <p className="text-[10.5px] text-slate-400">
+                Xác định chính xác nguyên nhân policy block qua 3 tầng độc lập (Chỉ dùng model clip-preview ~$0.04)
+              </p>
+            </div>
+          </div>
+          <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-950 text-purple-300 font-mono border border-purple-800 self-start sm:self-auto">
+            {DIAGNOSTIC_MODEL}
+          </span>
+        </div>
+
+        {/* Kết luận chẩn đoán tự động (Yêu cầu 9) */}
+        {diagnosticConclusion && (
+          <div
+            className={`p-3.5 rounded-2xl border text-xs space-y-1.5 ${
+              diagnosticConclusion.type === 'success'
+                ? 'bg-emerald-950/40 border-emerald-800 text-emerald-200'
+                : diagnosticConclusion.type === 'error'
+                ? 'bg-rose-950/50 border-rose-800 text-rose-200'
+                : 'bg-amber-950/40 border-amber-800 text-amber-200'
+            }`}
+          >
+            <div className="font-bold uppercase flex items-center gap-1.5">
+              {diagnosticConclusion.type === 'success' ? (
+                <CheckCircle2 size={14} className="text-emerald-400" />
+              ) : diagnosticConclusion.type === 'error' ? (
+                <XCircle size={14} className="text-rose-400" />
+              ) : (
+                <AlertCircle size={14} className="text-amber-400" />
+              )}
+              <span>{diagnosticConclusion.title}</span>
+            </div>
+            <p className="text-[11.5px]">{diagnosticConclusion.summary}</p>
+            <div className="p-2 rounded-xl bg-black/40 text-[11px] font-medium border border-white/5">
+              👉 {diagnosticConclusion.recommendation}
+            </div>
+          </div>
+        )}
+
+        {/* 3 NÚT KIỂM TRA ĐỘC LẬP (YÊU CẦU 4) */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {/* TEST A CARD */}
+          <div className="p-3 rounded-2xl bg-slate-900/80 border border-slate-800 flex flex-col justify-between space-y-3">
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-purple-300 uppercase">
+                  ① Kiểm tra Lyria cơ bản
+                </span>
+                {diagnosticResults.test_a && (
+                  <span
+                    className={`text-[10px] px-1.5 py-0.5 rounded font-bold uppercase font-mono ${
+                      diagnosticResults.test_a.outcome === 'pass'
+                        ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
+                        : diagnosticResults.test_a.outcome === 'blocked'
+                        ? 'bg-rose-950 text-rose-300 border border-rose-800'
+                        : 'bg-amber-950 text-amber-300 border border-amber-800'
+                    }`}
+                  >
+                    {diagnosticResults.test_a.outcome}
+                  </span>
+                )}
+              </div>
+              <p className="text-[10.5px] text-slate-400 leading-snug">
+                Prompt tối giản cố định an toàn, không có lời bài hát. Xác định API & auth có chạy không.
+              </p>
+            </div>
+
+            <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between">
+              <span className="text-[10px] text-slate-400 font-mono">~$0.04</span>
+              <button
+                id="btn-test-a"
+                onClick={() => setDiagnosticModalTest('test_a')}
+                disabled={runningTestId !== null}
+                className="px-2.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white text-[11px] font-bold transition-all active:scale-95 cursor-pointer"
+              >
+                {runningTestId === 'test_a' ? (
+                  <span className="flex items-center gap-1">
+                    <Loader2 size={11} className="animate-spin" /> Đang test...
+                  </span>
+                ) : (
+                  'Chạy Test A'
+                )}
+              </button>
+            </div>
+
+            {/* View Details for Test A */}
+            {diagnosticResults.test_a && (
+              <div className="pt-1 text-[10px] space-y-1 border-t border-slate-800/60">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">Kết quả:</span>
+                  <span
+                    className={`font-bold uppercase ${
+                      diagnosticResults.test_a.outcome === 'pass'
+                        ? 'text-emerald-400'
+                        : diagnosticResults.test_a.outcome === 'blocked'
+                        ? 'text-rose-400'
+                        : 'text-amber-400'
+                    }`}
+                  >
+                    {diagnosticResults.test_a.outcome}
+                  </span>
+                </div>
+                <button
+                  onClick={() =>
+                    setShowDiagPrompt((prev) => ({ ...prev, test_a: !prev.test_a }))
+                  }
+                  className="text-purple-300 hover:underline block text-[10px]"
+                >
+                  {showDiagPrompt.test_a ? 'Ẩn prompt đã gửi' : 'Xem exact prompt đã gửi'}
+                </button>
+                {showDiagPrompt.test_a && (
+                  <pre className="p-1.5 rounded bg-black/60 text-slate-300 font-mono text-[9.5px] whitespace-pre-wrap max-h-24 overflow-y-auto">
+                    {diagnosticResults.test_a.exactPrompt}
+                  </pre>
+                )}
+                {diagnosticResults.test_a.rawErrorDetails && (
+                  <button
+                    onClick={() =>
+                      setShowDiagError((prev) => ({ ...prev, test_a: !prev.test_a }))
+                    }
+                    className="text-rose-300 hover:underline block text-[10px]"
+                  >
+                    {showDiagError.test_a ? 'Ẩn lỗi' : 'Xem chi tiết lỗi'}
+                  </button>
+                )}
+                {showDiagError.test_a && diagnosticResults.test_a.rawErrorDetails && (
+                  <pre className="p-1.5 rounded bg-black/60 text-rose-300 font-mono text-[9.5px] whitespace-pre-wrap max-h-24 overflow-y-auto">
+                    {diagnosticResults.test_a.rawErrorDetails}
+                  </pre>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* TEST B CARD */}
+          <div className="p-3 rounded-2xl bg-slate-900/80 border border-slate-800 flex flex-col justify-between space-y-3">
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-purple-300 uppercase">
+                  ② Kiểm tra với lyrics
+                </span>
+                {diagnosticResults.test_b && (
+                  <span
+                    className={`text-[10px] px-1.5 py-0.5 rounded font-bold uppercase font-mono ${
+                      diagnosticResults.test_b.outcome === 'pass'
+                        ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
+                        : diagnosticResults.test_b.outcome === 'blocked'
+                        ? 'bg-rose-950 text-rose-300 border border-rose-800'
+                        : 'bg-amber-950 text-amber-300 border border-amber-800'
+                    }`}
+                  >
+                    {diagnosticResults.test_b.outcome}
+                  </span>
+                )}
+              </div>
+              <p className="text-[10.5px] text-slate-400 leading-snug">
+                Âm nhạc an toàn + lời ca của dự án. Xác định xem lyrics có phải nguyên nhân bị block.
+              </p>
+            </div>
+
+            <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between">
+              <span className="text-[10px] text-slate-400 font-mono">~$0.04</span>
+              <button
+                id="btn-test-b"
+                onClick={() => setDiagnosticModalTest('test_b')}
+                disabled={runningTestId !== null}
+                className="px-2.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white text-[11px] font-bold transition-all active:scale-95 cursor-pointer"
+              >
+                {runningTestId === 'test_b' ? (
+                  <span className="flex items-center gap-1">
+                    <Loader2 size={11} className="animate-spin" /> Đang test...
+                  </span>
+                ) : (
+                  'Chạy Test B'
+                )}
+              </button>
+            </div>
+
+            {/* View Details for Test B */}
+            {diagnosticResults.test_b && (
+              <div className="pt-1 text-[10px] space-y-1 border-t border-slate-800/60">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">Kết quả:</span>
+                  <span
+                    className={`font-bold uppercase ${
+                      diagnosticResults.test_b.outcome === 'pass'
+                        ? 'text-emerald-400'
+                        : diagnosticResults.test_b.outcome === 'blocked'
+                        ? 'text-rose-400'
+                        : 'text-amber-400'
+                    }`}
+                  >
+                    {diagnosticResults.test_b.outcome}
+                  </span>
+                </div>
+                <button
+                  onClick={() =>
+                    setShowDiagPrompt((prev) => ({ ...prev, test_b: !prev.test_b }))
+                  }
+                  className="text-purple-300 hover:underline block text-[10px]"
+                >
+                  {showDiagPrompt.test_b ? 'Ẩn prompt đã gửi' : 'Xem exact prompt đã gửi'}
+                </button>
+                {showDiagPrompt.test_b && (
+                  <pre className="p-1.5 rounded bg-black/60 text-slate-300 font-mono text-[9.5px] whitespace-pre-wrap max-h-24 overflow-y-auto">
+                    {diagnosticResults.test_b.exactPrompt}
+                  </pre>
+                )}
+                {diagnosticResults.test_b.rawErrorDetails && (
+                  <button
+                    onClick={() =>
+                      setShowDiagError((prev) => ({ ...prev, test_b: !prev.test_b }))
+                    }
+                    className="text-rose-300 hover:underline block text-[10px]"
+                  >
+                    {showDiagError.test_b ? 'Ẩn lỗi' : 'Xem chi tiết lỗi'}
+                  </button>
+                )}
+                {showDiagError.test_b && diagnosticResults.test_b.rawErrorDetails && (
+                  <pre className="p-1.5 rounded bg-black/60 text-rose-300 font-mono text-[9.5px] whitespace-pre-wrap max-h-24 overflow-y-auto">
+                    {diagnosticResults.test_b.rawErrorDetails}
+                  </pre>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* TEST C CARD */}
+          <div className="p-3 rounded-2xl bg-slate-900/80 border border-slate-800 flex flex-col justify-between space-y-3">
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-purple-300 uppercase">
+                  ③ Kiểm tra prompt BẮT LẤY
+                </span>
+                {diagnosticResults.test_c && (
+                  <span
+                    className={`text-[10px] px-1.5 py-0.5 rounded font-bold uppercase font-mono ${
+                      diagnosticResults.test_c.outcome === 'pass'
+                        ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
+                        : diagnosticResults.test_c.outcome === 'blocked'
+                        ? 'bg-rose-950 text-rose-300 border border-rose-800'
+                        : 'bg-amber-950 text-amber-300 border border-amber-800'
+                    }`}
+                  >
+                    {diagnosticResults.test_c.outcome}
+                  </span>
+                )}
+              </div>
+              <p className="text-[10.5px] text-slate-400 leading-snug">
+                Đầy đủ Music Blueprint (genre, mood, arrangement, lyrics). Kiểm tra toàn diện.
+              </p>
+            </div>
+
+            <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between">
+              <span className="text-[10px] text-slate-400 font-mono">~$0.04</span>
+              <button
+                id="btn-test-c"
+                onClick={() => setDiagnosticModalTest('test_c')}
+                disabled={runningTestId !== null}
+                className="px-2.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white text-[11px] font-bold transition-all active:scale-95 cursor-pointer"
+              >
+                {runningTestId === 'test_c' ? (
+                  <span className="flex items-center gap-1">
+                    <Loader2 size={11} className="animate-spin" /> Đang test...
+                  </span>
+                ) : (
+                  'Chạy Test C'
+                )}
+              </button>
+            </div>
+
+            {/* View Details for Test C */}
+            {diagnosticResults.test_c && (
+              <div className="pt-1 text-[10px] space-y-1 border-t border-slate-800/60">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">Kết quả:</span>
+                  <span
+                    className={`font-bold uppercase ${
+                      diagnosticResults.test_c.outcome === 'pass'
+                        ? 'text-emerald-400'
+                        : diagnosticResults.test_c.outcome === 'blocked'
+                        ? 'text-rose-400'
+                        : 'text-amber-400'
+                    }`}
+                  >
+                    {diagnosticResults.test_c.outcome}
+                  </span>
+                </div>
+                <button
+                  onClick={() =>
+                    setShowDiagPrompt((prev) => ({ ...prev, test_c: !prev.test_c }))
+                  }
+                  className="text-purple-300 hover:underline block text-[10px]"
+                >
+                  {showDiagPrompt.test_c ? 'Ẩn prompt đã gửi' : 'Xem exact prompt đã gửi'}
+                </button>
+                {showDiagPrompt.test_c && (
+                  <pre className="p-1.5 rounded bg-black/60 text-slate-300 font-mono text-[9.5px] whitespace-pre-wrap max-h-24 overflow-y-auto">
+                    {diagnosticResults.test_c.exactPrompt}
+                  </pre>
+                )}
+                {diagnosticResults.test_c.rawErrorDetails && (
+                  <button
+                    onClick={() =>
+                      setShowDiagError((prev) => ({ ...prev, test_c: !prev.test_c }))
+                    }
+                    className="text-rose-300 hover:underline block text-[10px]"
+                  >
+                    {showDiagError.test_c ? 'Ẩn lỗi' : 'Xem chi tiết lỗi'}
+                  </button>
+                )}
+                {showDiagError.test_c && diagnosticResults.test_c.rawErrorDetails && (
+                  <pre className="p-1.5 rounded bg-black/60 text-rose-300 font-mono text-[9.5px] whitespace-pre-wrap max-h-24 overflow-y-auto">
+                    {diagnosticResults.test_c.rawErrorDetails}
+                  </pre>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Diagnostic Audio Player if test generated audio */}
+        {diagnosticAudioUrl && (
+          <div className="p-3 rounded-xl bg-purple-950/40 border border-purple-800/50 flex items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={toggleDiagnosticPlay}
+                className="w-8 h-8 rounded-full bg-purple-600 text-white flex items-center justify-center hover:bg-purple-500 cursor-pointer shrink-0"
+              >
+                {isDiagPlaying ? <Pause size={14} /> : <Play size={14} className="ml-0.5" />}
+              </button>
+              <div>
+                <span className="font-bold text-white block">
+                  Đã tạo đoạn âm thanh kiểm tra ({diagnosticAudioUrl.testId.toUpperCase()})
+                </span>
+                <span className="text-[10px] text-purple-300">
+                  Lyria đã trả về âm thanh thành công cho test này.
+                </span>
+              </div>
+            </div>
+            <span className="text-[10px] px-2 py-0.5 rounded bg-purple-900/60 text-purple-200 font-mono">
+              30s clip
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* CONFIRMATION MODAL CHO BÀI TEST CHẨN ĐOÁN (YÊU CẦU 4) */}
+      {diagnosticModalTest && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="w-full max-w-md bg-slate-900 border border-purple-500/40 rounded-3xl p-6 shadow-2xl space-y-4">
+            <div className="flex items-center gap-2.5 text-purple-400">
+              <div className="w-10 h-10 rounded-2xl bg-purple-500/20 flex items-center justify-center text-purple-300">
+                <Wrench size={20} />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-white uppercase">
+                  XÁC NHẬN KIỂM TRA LYRIA ({diagnosticModalTest === 'test_a' ? 'TEST A' : diagnosticModalTest === 'test_b' ? 'TEST B' : 'TEST C'})
+                </h3>
+                <span className="text-[10px] text-purple-300 font-mono">
+                  Mô hình: {DIAGNOSTIC_MODEL}
+                </span>
+              </div>
+            </div>
+
+            <div className="space-y-3 text-xs text-slate-300 leading-relaxed">
+              <p>
+                {diagnosticModalTest === 'test_a' &&
+                  'BẮT LẤY sẽ gửi prompt âm nhạc tối giản (hoàn toàn an toàn, không có lời bài hát) tới Lyria để kiểm tra kết nối API và authentication.'}
+                {diagnosticModalTest === 'test_b' &&
+                  'BẮT LẤY sẽ gửi prompt âm nhạc cơ bản kèm lời ca hiện tại của bài hát để kiểm tra xem lyrics có kích hoạt safety/recitation filter hay không.'}
+                {diagnosticModalTest === 'test_c' &&
+                  'BẮT LẤY sẽ gửi prompt đầy đủ từ Music Blueprint (thể loại, hòa âm, phối khí, ca từ) để kiểm tra tính toàn vẹn.'}
+              </p>
+
+              <div className="p-3.5 rounded-2xl bg-purple-950/60 border border-purple-800/50 space-y-1">
+                <p className="font-bold text-purple-200 flex items-center justify-between text-xs">
+                  <span>Chi phí kiểm tra dự kiến:</span>
+                  <span className="text-purple-300 font-mono text-sm">
+                    ${LYRIA_CLIP_ESTIMATED_COST}
+                  </span>
+                </p>
+                <p className="text-[11px] text-purple-300/80">
+                  Chỉ sử dụng model clip preview (lyria-3-clip-preview), tuyệt đối không dùng model bài đầy đủ.
+                </p>
+              </div>
+
+              <p className="text-[11px] text-slate-400">
+                * Bản thu gốc, Music Blueprint và lịch sử phiên bản của bạn không bao giờ bị thay đổi.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-800">
+              <button
+                onClick={() => setDiagnosticModalTest(null)}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors cursor-pointer"
+              >
+                HỦY
+              </button>
+              <button
+                id="btn-confirm-diagnostic-test"
+                onClick={() => handleExecuteDiagnosticTest(diagnosticModalTest)}
+                className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold shadow-md shadow-purple-900/50 transition-all active:scale-95 cursor-pointer"
+              >
+                XÁC NHẬN KIỂM TRA (${LYRIA_CLIP_ESTIMATED_COST})
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CONFIRMATION MODAL CHO CLIP 30S */}
       {confirmModalType === 'clip' && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="w-full max-w-md bg-slate-900 border border-purple-500/40 rounded-3xl p-6 shadow-2xl space-y-4">
@@ -808,7 +1393,7 @@ export const SongDemoSection: React.FC<SongDemoSectionProps> = ({
         </div>
       )}
 
-      {/* CONFIRMATION MODAL CHO BÀI HÁT ĐẦY ĐỦ (Yêu cầu 8) */}
+      {/* CONFIRMATION MODAL CHO BÀI HÁT ĐẦY ĐỦ */}
       {confirmModalType === 'full' && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="w-full max-w-md bg-slate-900 border border-pink-500/40 rounded-3xl p-6 shadow-2xl space-y-4">

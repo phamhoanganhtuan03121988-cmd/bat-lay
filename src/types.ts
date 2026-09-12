@@ -97,17 +97,43 @@ export const LYRIA_FULL_ESTIMATED_COST = 0.08;
 
 export type GenerationType = 'clip' | 'full';
 
+export type PromptType =
+  | 'diagnostic-minimal'
+  | 'diagnostic-with-lyrics'
+  | 'diagnostic-production'
+  | 'production';
+
 export interface GenerationRecord {
   id: string;
   projectId: string;
   model: string;
   prompt: string;
+  exactPrompt: string;
+  promptType: PromptType;
   generationType: GenerationType;
   estimatedCost: number;
   createdAt: number;
+  timestamp: number;
   status: 'success' | 'blocked' | 'error';
   errorCode?: string;
   errorMessage?: string;
+}
+
+export type DiagnosticTestId = 'test_a' | 'test_b' | 'test_c';
+export type DiagnosticOutcome = 'idle' | 'running' | 'pass' | 'blocked' | 'error';
+
+export interface DiagnosticTestResult {
+  testId: DiagnosticTestId;
+  testName: string;
+  outcome: DiagnosticOutcome;
+  model: string;
+  exactPrompt: string;
+  timestamp?: number;
+  errorSummary?: string;
+  rawErrorDetails?: string;
+  errorCode?: string;
+  audioBlob?: Blob;
+  mimeType?: string;
 }
 
 export interface GeneratedSong {
