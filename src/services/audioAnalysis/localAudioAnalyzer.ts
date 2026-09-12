@@ -88,13 +88,19 @@ function pearsonCorrelation(x: number[], y: number[]): number {
 function extractVoicedPitches(
   samples: Float32Array,
   sampleRate: number
-): { pitchesHz: number[]; chromaCounts: number[]; sustainedRuns: number } {
+): {
+  pitchesHz: number[];
+  pitchPoints: { time: number; hz: number; noteName: string }[];
+  chromaCounts: number[];
+  sustainedRuns: number;
+} {
   const windowSize = 2048;
   const hopSize = 1024;
   const minLag = Math.floor(sampleRate / 800); // ~800 Hz
   const maxLag = Math.floor(sampleRate / 65);  // ~65 Hz
   
   const pitchesHz: number[] = [];
+  const pitchPoints: { time: number; hz: number; noteName: string }[] = [];
   const chromaCounts = new Array(12).fill(0);
   let sustainedRuns = 0;
   let currentRun = 0;
@@ -152,6 +158,16 @@ function extractVoicedPitches(
       const midi = 69 + 12 * Math.log2(freq / 440);
       const semitone = Math.round(midi);
       const pitchClass = ((semitone % 12) + 12) % 12;
+      const octave = Math.floor(semitone / 12) - 1;
+      const noteName = `${PITCH_CLASSES[pitchClass]}${octave}`;
+      const timeSec = Number((offset / sampleRate).toFixed(2));
+
+      pitchPoints.push({
+        time: timeSec,
+        hz: Math.round(freq),
+        noteName,
+      });
+
       chromaCounts[pitchClass]++;
 
       if (pitchClass === lastPitchClass) {
@@ -167,8 +183,9 @@ function extractVoicedPitches(
     }
   }
 
-  return { pitchesHz, chromaCounts, sustainedRuns };
+  return { pitchesHz, pitchPoints, chromaCounts, sustainedRuns };
 }
+
 
 /**
  * Determine musical key from pitch chroma using Krumhansl-Schmuckler correlation
@@ -362,7 +379,7 @@ export async function analyzeAudioWithLocalDSP(
   const silenceRatio = silentSamples / Math.max(1, channelData.length);
 
   // 2. Pitch tracking & Chroma
-  const { pitchesHz, chromaCounts, sustainedRuns } = extractVoicedPitches(channelData, sampleRate);
+  const { pitchesHz, pitchPoints, chromaCounts, sustainedRuns } = extractVoicedPitches(channelData, sampleRate);
 
   // 3. Musical Key (Krumhansl-Schmuckler)
   const { key: detectedKey, confidence: keyConfidence } = estimateMusicalKey(chromaCounts);
@@ -372,6 +389,35 @@ export async function analyzeAudioWithLocalDSP(
 
   // 5. Pitch Contour & Melody Description
   const { contour, description: melodyDesc } = analyzePitchContour(pitchesHz);
+
+  // 5b. Detailed Melody Analysis Data for V2 visualizer (strictly from real DSP)
+  let melodyData: import('../../types').MelodyAnalysisData | null = null;
+  if (pitchesHz.length >= 4 && pitchPoints.length >= 4) {
+    const minHz = Math.min(...pitchesHz);
+    const maxHz = Math.max(...pitchesHz);
+    let peakHz = 0;
+    let peakNote = '';
+    for (const pt of pitchPoints) {
+      if (pt.hz > peakHz) {
+        peakHz = pt.hz;
+        peakNote = pt.noteName;
+      }
+    }
+    const pitchRangeSemitones = Number((12 * Math.log2(maxHz / Math.max(1, minHz))).toFixed(1));
+
+    melodyData = {
+      pitchesHz,
+      pitchPoints,
+      minHz: Math.round(minHz),
+      maxHz: Math.round(maxHz),
+      peakHz: Math.round(peakHz),
+      peakNote: peakNote || 'N/A',
+      pitchRangeSemitones,
+      contour,
+      contourDescription: melodyDesc,
+      sustainedRuns,
+    };
+  }
 
   // 6. Input Classification based on real acoustic traits
   let inputType: InputClassification = 'humming_melody';
@@ -475,12 +521,14 @@ export async function analyzeAudioWithLocalDSP(
       'Tự động viết tiếp lời thơ & phát triển ca từ',
       'Phân tích ngữ nghĩa cảm xúc sâu từ văn bản',
     ],
+    melodyData,
     acousticFeatures: {
       avgRmsEnergy: Number(avgRms.toFixed(4)),
       silenceRatio: Number(silenceRatio.toFixed(2)),
       pitchContour: contour,
       detectedNoteCount: pitchesHz.length,
       dominantFreqHz: pitchesHz.length > 0 ? Math.round(pitchesHz[Math.floor(pitchesHz.length / 2)]) : undefined,
+      pitchesHz,
     },
   };
 }

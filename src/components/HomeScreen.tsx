@@ -148,9 +148,21 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                     <Music size={16} />
                   </div>
                   <div className="min-w-0">
-                    <h4 className="text-xs font-bold text-slate-100 truncate group-hover:text-purple-300 transition-colors">
-                      {idea.title}
-                    </h4>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <h4 className="text-xs font-bold text-slate-100 truncate group-hover:text-purple-300 transition-colors">
+                        {idea.title}
+                      </h4>
+                      {idea.status === 'in_progress' && (
+                        <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-blue-950/70 border border-blue-800 text-blue-300 font-medium">
+                          Đang phát triển
+                        </span>
+                      )}
+                      {idea.status === 'completed' && (
+                        <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-emerald-950/70 border border-emerald-800 text-emerald-300 font-medium">
+                          Đã hoàn thiện
+                        </span>
+                      )}
+                    </div>
                     <div className="flex items-center gap-2 text-[11px] text-slate-400 mt-0.5">
                       <span>{formatDateTime(idea.createdAt)}</span>
                       {idea.context && (

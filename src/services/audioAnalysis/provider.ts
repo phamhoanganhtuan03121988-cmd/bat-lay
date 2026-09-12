@@ -51,3 +51,4 @@ export class CompositeAudioAnalysisProvider implements AudioAnalysisProvider {
 }
 
 export const defaultAudioAnalyzer = new CompositeAudioAnalysisProvider();
+export const defaultGeminiProvider = new GeminiAudioAnalysisProvider();

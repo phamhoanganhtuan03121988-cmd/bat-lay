@@ -1,17 +1,15 @@
 /**
  * BẮT LẤY - AI Audio Analysis Types & Contracts
  */
+import {
+  InputClassification,
+  GenreSuggestion,
+  MelodyAnalysisData,
+  SongSection,
+  SongDevelopment,
+} from '../../types';
 
-export type InputClassification =
-  | 'singing_with_lyrics'
-  | 'humming_melody'
-  | 'spoken_idea'
-  | 'instrument_or_ambient';
-
-export interface GenreSuggestion {
-  name: string;
-  reason: string;
-}
+export type { InputClassification, GenreSuggestion, MelodyAnalysisData, SongSection, SongDevelopment };
 
 export interface AudioAnalysisResult {
   duration: number; // in seconds
@@ -31,18 +29,57 @@ export interface AudioAnalysisResult {
   // Provenance & AI Connection Transparency
   analyzedWith: 'local_dsp' | 'gemini_multimodal' | 'hybrid';
   needsAiConnectionFor?: string[];
+  melodyData?: MelodyAnalysisData | null;
   acousticFeatures?: {
     avgRmsEnergy: number;
     silenceRatio: number;
     pitchContour: 'ascending' | 'descending' | 'melodic_wave' | 'speech_like' | 'flat' | 'indeterminate';
     detectedNoteCount: number;
     dominantFreqHz?: number;
+    pitchesHz?: number[];
   };
 }
 
 export interface CreativitySettings {
   keepMelodyPct?: number; // 0 - 100
   keepLyricPct?: number;  // 0 - 100
+}
+
+export interface SongDevelopmentRequest {
+  audioBlob?: Blob;
+  title: string;
+  duration: number;
+  originalLyric?: string | null;
+  transcript?: string | null;
+  emotion?: string | null;
+  bpm?: number | null;
+  key?: string | null;
+  melodyDescription?: string | null;
+  genreSuggestions?: GenreSuggestion[];
+  creativitySettings: CreativitySettings;
+  currentLyrics?: string;
+  currentSections?: SongSection[];
+  melodyData?: MelodyAnalysisData | null;
+}
+
+export type LyricActionType =
+  | 'continue'      // ✨ AI viết tiếp
+  | 'rewrite'       // ✨ Viết lại đoạn này
+  | 'add_chorus'    // ✨ Thêm điệp khúc
+  | 'verse_2'       // ✨ Viết Verse 2
+  | 'bridge';       // ✨ Viết Bridge
+
+export interface LyricActionRequest {
+  action: LyricActionType;
+  selectedText?: string;
+  currentLyrics: string;
+  originalLyric?: string | null;
+  transcript?: string | null;
+  emotion?: string | null;
+  key?: string | null;
+  bpm?: number | null;
+  creativitySettings: CreativitySettings;
+  genreSuggestions?: GenreSuggestion[];
 }
 
 export interface AudioAnalysisProvider {
@@ -54,3 +91,4 @@ export interface AudioAnalysisProvider {
     creativitySettings?: CreativitySettings
   ): Promise<AudioAnalysisResult>;
 }
+

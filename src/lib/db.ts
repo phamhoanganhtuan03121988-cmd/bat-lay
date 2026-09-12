@@ -125,3 +125,88 @@ export async function toggleFavorite(id: string): Promise<boolean> {
   await updateIdea(id, { favorite: newFav });
   return newFav;
 }
+
+/**
+ * V2 Version Management: Save a new snapshot version of the song project
+ * Never overwrites the original recorded audio or original metadata.
+ */
+export async function createIdeaVersion(
+  id: string,
+  params: {
+    name?: string;
+    lyrics?: string;
+    sections?: import('../types').SongSection[];
+    development?: import('../types').SongDevelopment;
+    creativeControls?: { keepMelodyPct: number; keepLyricPct: number };
+    note?: string;
+  }
+): Promise<{ idea: import('../types').AudioIdea; newVersion: import('../types').ProjectVersion }> {
+  const idea = await getIdeaById(id);
+  if (!idea) {
+    throw new Error(`Idea with id ${id} not found.`);
+  }
+
+  const existingVersions = idea.versions || [];
+  const versionNumber = existingVersions.length + 1;
+  const versionName = params.name || `Phiên bản V${versionNumber}`;
+  const versionId = `ver_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+
+  const newVersion: import('../types').ProjectVersion = {
+    id: versionId,
+    name: versionName,
+    createdAt: Date.now(),
+    savedAt: Date.now(),
+    lyrics: params.lyrics ?? idea.lyrics ?? idea.developedLyric ?? idea.originalLyric ?? '',
+    sections: params.sections ?? idea.songDevelopment?.sections,
+    development: params.development ?? idea.songDevelopment,
+    creativeControls: params.creativeControls ?? idea.creativeControls,
+    note: params.note,
+  };
+
+  const updatedVersions = [...existingVersions, newVersion];
+
+  const updatedIdea = await updateIdea(id, {
+    versions: updatedVersions,
+    activeVersionId: versionId,
+    lyrics: newVersion.lyrics,
+    songDevelopment: newVersion.development,
+    creativeControls: newVersion.creativeControls,
+    status: (idea.status === 'draft' ? 'in_progress' : idea.status) as import('../types').ProjectStatus,
+    updatedAt: Date.now(),
+  });
+
+  return { idea: updatedIdea, newVersion };
+}
+
+/**
+ * V2 Version Management: Switch to an existing snapshot version
+ */
+export async function switchIdeaVersion(id: string, versionId: string): Promise<import('../types').AudioIdea> {
+  const idea = await getIdeaById(id);
+  if (!idea) {
+    throw new Error(`Idea with id ${id} not found.`);
+  }
+
+  if (versionId === 'original') {
+    // Switch to original state
+    return await updateIdea(id, {
+      activeVersionId: 'original',
+      lyrics: idea.originalLyric || idea.transcript || '',
+      updatedAt: Date.now(),
+    });
+  }
+
+  const targetVersion = (idea.versions || []).find((v) => v.id === versionId);
+  if (!targetVersion) {
+    throw new Error(`Version ${versionId} not found.`);
+  }
+
+  return await updateIdea(id, {
+    activeVersionId: versionId,
+    lyrics: targetVersion.lyrics,
+    songDevelopment: targetVersion.development,
+    creativeControls: targetVersion.creativeControls,
+    updatedAt: Date.now(),
+  });
+}
+

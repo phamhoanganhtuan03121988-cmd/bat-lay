@@ -18,6 +18,10 @@ import {
   InputClassification,
   GenreSuggestion,
   CreativitySettings,
+  SongDevelopmentRequest,
+  SongDevelopment,
+  SongSection,
+  LyricActionRequest,
 } from './types';
 import { analyzeAudioWithLocalDSP } from './localAudioAnalyzer';
 import { getStoredApiKey, hasApiKeyConfigured } from './apiKeyStorage';
@@ -397,6 +401,305 @@ Trả về DUY NHẤT một chuỗi JSON hợp lệ theo đúng cấu trúc sche
     };
   }
 
+  /**
+   * Universal internal caller with Dual-API support:
+   * 1. Interactions API (v1beta/interactions)
+   * 2. Fallback to generateContent (v1beta/models/gemini-3.6-flash:generateContent)
+   */
+  private async executeGeminiPrompt(
+    apiKey: string,
+    prompt: string,
+    audio?: { base64: string; mimeType: string },
+    temperature: number = 0.4
+  ): Promise<string> {
+    let rawText = '';
+    let interactionsSuccess = false;
+
+    // 1. Try Interactions API first
+    const interactionsUrl = `https://generativelanguage.googleapis.com/v1beta/interactions?key=${encodeURIComponent(apiKey)}`;
+    try {
+      const inputItems: Array<{ type: string; data?: string; mime_type?: string; text?: string }> = [];
+      if (audio && audio.base64) {
+        inputItems.push({
+          type: 'audio',
+          data: audio.base64,
+          mime_type: audio.mimeType,
+        });
+      }
+      inputItems.push({
+        type: 'text',
+        text: prompt,
+      });
+
+      const response = await fetch(interactionsUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'gemini-3.6-flash',
+          input: inputItems,
+          generation_config: { temperature },
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (Array.isArray(data.steps)) {
+          for (const step of data.steps) {
+            if (step.type === 'model_output' && Array.isArray(step.content)) {
+              for (const c of step.content) {
+                if (c.type === 'text' && c.text) {
+                  rawText += c.text;
+                }
+              }
+            }
+          }
+        }
+        if (!rawText && data.output_text) {
+          rawText = data.output_text;
+        }
+        if (rawText) {
+          interactionsSuccess = true;
+        }
+      } else if (response.status !== 404) {
+        const errJson = await response.json().catch(() => null);
+        const errObj = Array.isArray(errJson) ? errJson[0]?.error : errJson?.error;
+        const errMsg = errObj?.message || `HTTP ${response.status} ${response.statusText}`;
+        this.handleApiHttpError(response.status, errMsg, errObj?.details?.[0]?.reason);
+      }
+    } catch (netErr: unknown) {
+      if (netErr instanceof Error && netErr.message.startsWith('Gemini:')) {
+        throw netErr;
+      }
+      console.warn('Interactions API non-fatal error, falling back to generateContent:', netErr);
+    }
+
+    // 2. Fallback to generateContent
+    if (!interactionsSuccess) {
+      const generateUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${encodeURIComponent(apiKey)}`;
+      try {
+        const parts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [];
+        parts.push({ text: prompt });
+        if (audio && audio.base64) {
+          parts.push({
+            inlineData: {
+              mimeType: audio.mimeType,
+              data: audio.base64,
+            },
+          });
+        }
+
+        const response = await fetch(generateUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts }],
+            generationConfig: {
+              responseMimeType: prompt.includes('JSON') ? 'application/json' : 'text/plain',
+              temperature,
+            },
+          }),
+        });
+
+        if (!response.ok) {
+          const errJson = await response.json().catch(() => null);
+          const errObj = Array.isArray(errJson) ? errJson[0]?.error : errJson?.error;
+          const errMsg = errObj?.message || `HTTP ${response.status} ${response.statusText}`;
+          this.handleApiHttpError(response.status, errMsg, errObj?.details?.[0]?.reason);
+        }
+
+        const data = await response.json();
+        const candidateText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (candidateText) {
+          rawText = candidateText;
+        }
+      } catch (genErr: unknown) {
+        if (genErr instanceof Error && genErr.message.startsWith('Gemini:')) {
+          throw genErr;
+        }
+        throw new Error('Không thể kết nối đến máy chủ Google Gemini. Vui lòng kiểm tra kết nối mạng của bạn.');
+      }
+    }
+
+    if (!rawText || !rawText.trim()) {
+      throw new Error('Gemini không trả về kết quả.');
+    }
+
+    return rawText;
+  }
+
+  /**
+   * V2 Feature: Song Development Engine (✨ PHÁT TRIỂN Ý TƯỞNG)
+   * Receives original idea, DSP findings, current draft, and creative preservation sliders.
+   * Returns a complete song development suite: lyrics, structured sections, hook, melody notes, chords, arrangement.
+   */
+  async developSong(req: SongDevelopmentRequest): Promise<SongDevelopment> {
+    const apiKey = getStoredApiKey();
+    if (!apiKey) {
+      throw new Error('Gemini chưa được kết nối. Vui lòng gắn API Key trong Cài đặt AI để sử dụng tính năng phát triển bài hát.');
+    }
+
+    let audioData: { base64: string; mimeType: string } | undefined;
+    if (req.audioBlob) {
+      try {
+        audioData = await blobToBase64(req.audioBlob);
+      } catch (e) {
+        console.warn('Could not encode audio blob for developSong, proceeding with text context:', e);
+      }
+    }
+
+    const keepMelodyPct = req.creativitySettings.keepMelodyPct ?? 80;
+    const keepLyricPct = req.creativitySettings.keepLyricPct ?? 70;
+
+    const originalLyricText = req.originalLyric || req.transcript;
+    const isHummingOrInstrument = !originalLyricText || originalLyricText.trim() === '';
+
+    const prompt = `
+Bạn là một nhạc sĩ, nhà soạn nhạc và nhà sản xuất âm nhạc chuyên nghiệp, đồng hành cùng người dùng trong ứng dụng "BẮT LẤY" để phát triển một ý tưởng âm thanh thô thành một bài hát hoàn chỉnh.
+
+==============================
+NGUYÊN TẮC CỐT LÕI (BẮT BUỘC):
+==============================
+1. "BẢO TỒN Ý TƯỞNG GỐC":
+   - Tinh thần, cảm xúc chủ đạo và cái hồn của bản thu ban đầu là kim chỉ nam tối cao.
+   - Không được biến bài hát thành một câu chuyện hoàn toàn xa lạ.
+   - Nếu bản thu gốc là ngâm nga giai điệu không lời (humming): hãy đặt lời ca tiếng Việt thật giàu hình ảnh và tự nhiên dựa đúng theo giai điệu ngân nga ấy.
+   - Nếu bản thu gốc đã có câu hát: giữ trọn vẹn câu hát gốc làm hạt nhân (thường đặt ở Verse 1 hoặc Chorus), không tự ý xóa bỏ hay xuyên tạc.
+
+2. CÀI ĐẶT BẢO TOÀN SÁNG TẠO:
+   - Tỷ lệ bảo tồn giai điệu gốc: ${keepMelodyPct}%
+     ${keepMelodyPct >= 70 ? '-> Ưu tiên giữ chặt mô-típ nốt và tiết tấu gốc.' : '-> Cho phép đề xuất các đoạn phát triển hoặc mở rộng biến tấu quãng giai điệu.'}
+   - Tỷ lệ bảo tồn ca từ gốc: ${keepLyricPct}%
+     ${keepLyricPct >= 70 ? '-> Ưu tiên giữ nguyên vẹn từ ngữ, hình ảnh và câu chữ trong bản thu.' : '-> Cho phép AI phát triển từ ngữ mới mẻ, mở rộng câu chuyện mạnh mẽ hơn.'}
+
+==============================
+DỮ LIỆU ĐO ĐẠC GỐC TỪ THIẾT BỊ:
+==============================
+- Tên ý tưởng: "${req.title}"
+- Thời lượng bản thu: ${req.duration.toFixed(1)}s
+- Lời ca gốc / Câu nói trong bản thu: ${originalLyricText ? `"${originalLyricText}"` : '(Ngâm nga giai điệu không lời / Humming)'}
+- Cảm xúc ban đầu: ${req.emotion || 'Chưa xác định'}
+- Nhịp độ (BPM): ${req.bpm ? `${req.bpm} BPM` : 'Nhịp tự do'}
+- Gam giọng: ${req.key || 'Tự do'}
+- Đường nét giai điệu DSP: ${req.melodyDescription || 'Tự nhiên'}
+- Thể loại phù hợp: ${req.genreSuggestions?.map(g => g.name).join(', ') || 'Pop / Ballad / Indie'}
+${req.currentLyrics ? `- Bản thảo lời hiện tại của người dùng:\n${req.currentLyrics}` : ''}
+
+==============================
+YÊU CẦU ĐẦU RA (JSON FORMAT):
+==============================
+Hãy trả về DUY NHẤT một chuỗi JSON hợp lệ theo schema sau:
+{
+  "developedLyrics": string, // Toàn bộ bài hát hoàn chỉnh (có ghi rõ các tiêu đề phân đoạn như [Verse 1], [Chorus]...)
+  "sections": [
+    {
+      "type": "Intro" | "Verse 1" | "Pre-Chorus" | "Chorus" | "Verse 2" | "Bridge" | "Final Chorus" | "Outro",
+      "title": string, // Tên hiển thị (ví dụ "Verse 1 (Ý tưởng gốc)", "Chorus (Hook chính)")
+      "content": string, // Ca từ tiếng Việt của đoạn này (viết giàu chất thơ, vần điệu mượt mà)
+      "chords": string, // Vòng hợp âm gợi ý cụ thể (ví dụ "C - G/B - Am7 - Fmaj7")
+      "notes": string // Ghi chú cảm xúc, cách nhấn nhá hoặc hát
+    }
+  ],
+  "hookSuggestion": string, // Câu hook / câu điệp khúc "ăn tiền" nhất của bài, đọng lại trong tâm trí
+  "melodyDevelopment": string, // Hướng dẫn phát triển giai điệu (cách mở rộng âm vực, nốt nhấn cao trào, chuyển tiếp)
+  "harmonyChords": string, // Vòng hòa âm tổng thể đề xuất cho bài hát
+  "arrangementDirection": string // Hướng phối khí cụ thể: loại nhạc cụ chính (Guitar mộc, Piano, Beat lofi, Synth...), nhịp điệu và không gian âm thanh
+}
+`.trim();
+
+    const raw = await this.executeGeminiPrompt(apiKey, prompt, audioData, 0.4);
+
+    try {
+      const jsonMatch = raw.match(/```json\s*([\s\S]*?)\s*```/) || raw.match(/([\{\[][\s\S]*[\}\]])/);
+      const parsed = JSON.parse(jsonMatch ? jsonMatch[1] : raw);
+
+      const sections: SongSection[] = Array.isArray(parsed.sections)
+        ? parsed.sections.map((s: any, idx: number) => ({
+            id: `sec_${Date.now()}_${idx}`,
+            type: s.type || 'Custom',
+            title: s.title || s.type || `Đoạn ${idx + 1}`,
+            content: String(s.content || '').trim(),
+            chords: s.chords ? String(s.chords).trim() : undefined,
+            notes: s.notes ? String(s.notes).trim() : undefined,
+          }))
+        : [];
+
+      return {
+        developedLyrics: String(parsed.developedLyrics || '').trim(),
+        sections,
+        hookSuggestion: parsed.hookSuggestion ? String(parsed.hookSuggestion).trim() : undefined,
+        melodyDevelopment: parsed.melodyDevelopment ? String(parsed.melodyDevelopment).trim() : undefined,
+        harmonyChords: parsed.harmonyChords ? String(parsed.harmonyChords).trim() : undefined,
+        arrangementDirection: parsed.arrangementDirection ? String(parsed.arrangementDirection).trim() : undefined,
+        lastDevelopedAt: Date.now(),
+      };
+    } catch (err) {
+      console.error('Failed to parse Gemini Song Development JSON:', raw, err);
+      throw new Error('Gemini trả về cấu trúc phát triển bài hát không hợp lệ. Vui lòng thử lại.');
+    }
+  }
+
+  /**
+   * V2 Feature: Targeted Lyric Expansion Actions:
+   * - "continue": ✨ AI viết tiếp
+   * - "rewrite": ✨ Viết lại đoạn này
+   * - "add_chorus": ✨ Thêm điệp khúc
+   * - "verse_2": ✨ Viết Verse 2
+   * - "bridge": ✨ Viết Bridge
+   */
+  async expandLyrics(req: LyricActionRequest): Promise<string> {
+    const apiKey = getStoredApiKey();
+    if (!apiKey) {
+      throw new Error('Gemini chưa được kết nối. Vui lòng gắn API Key trong Cài đặt AI.');
+    }
+
+    const keepLyricPct = req.creativitySettings.keepLyricPct ?? 70;
+    let actionInstruction = '';
+
+    switch (req.action) {
+      case 'continue':
+        actionInstruction = 'Hãy viết tiếp 1 đến 2 khổ thơ tiếp nối mượt mà cho ca từ hiện tại. Giữ nguyên văn phong, vần điệu và cảm xúc đang có.';
+        break;
+      case 'rewrite':
+        actionInstruction = req.selectedText
+          ? `Hãy viết lại đoạn ca từ sau đây cho giàu chất thơ, tinh tế và dễ hát hơn nhưng vẫn giữ trọn ý nghĩa gốc: "${req.selectedText}"`
+          : 'Hãy tinh chỉnh và viết lại ca từ hiện tại để giàu chất thơ, vần điệu uyển chuyển và gợi cảm xúc sâu lắng hơn.';
+        break;
+      case 'add_chorus':
+        actionInstruction = 'Hãy sáng tác một đoạn Điệp khúc (Chorus / Hook) bùng nổ cảm xúc, dễ nhớ, bắt tai, làm nổi bật thông điệp cốt lõi của bài hát.';
+        break;
+      case 'verse_2':
+        actionInstruction = 'Hãy viết tiếp Lời 2 (Verse 2) phát triển mạch câu chuyện, đưa cảm xúc đi sâu hơn hoặc mở ra một chiều không gian mới.';
+        break;
+      case 'bridge':
+        actionInstruction = 'Hãy sáng tác một đoạn Cầu nối (Bridge) chuyển hướng cảm xúc hoặc thay đổi góc nhìn, trước khi bài hát bùng nổ trở lại.';
+        break;
+    }
+
+    const prompt = `
+Bạn là nhà soạn lời bài hát tiếng Việt tài hoa.
+Người dùng đang sáng tác bài hát với các thông số:
+- Lời gốc ban đầu trong bản ghi âm: ${req.originalLyric ? `"${req.originalLyric}"` : 'Ý tưởng ban đầu là giai điệu ngâm nga'}
+- Cảm xúc bài hát: ${req.emotion || 'Chân thành, sâu lắng'}
+- Gam giọng & Nhịp độ: ${req.key || 'Tự do'}, ${req.bpm ? `${req.bpm} BPM` : 'Tự do'}
+- Mức độ bảo tồn ca từ gốc: ${keepLyricPct}% (${keepLyricPct >= 70 ? 'Giữ tối đa từ ngữ và hình ảnh gốc' : 'Tự do mở rộng sáng tạo'})
+
+Ca từ hiện tại trong bản thảo:
+"""
+${req.currentLyrics}
+"""
+
+YÊU CẦU:
+${actionInstruction}
+
+QUY TẮC:
+- Viết bằng tiếng Việt tự nhiên, giàu hình ảnh, vần điệu đẹp, phù hợp với thanh điệu âm nhạc.
+- Không viết lời dẫn hay giải thích dài dòng. Chỉ trả về trực tiếp đoạn ca từ tiếng Việt được tạo ra.
+`.trim();
+
+    const result = await this.executeGeminiPrompt(apiKey, prompt, undefined, 0.4);
+    return result.trim().replace(/^```[a-z]*\n/i, '').replace(/\n```$/, '').trim();
+  }
+
   async analyzeAudio(
     blob: Blob,
     duration: number,
@@ -434,4 +737,5 @@ Trả về DUY NHẤT một chuỗi JSON hợp lệ theo đúng cấu trúc sche
     throw new Error(`Gemini: Lỗi máy chủ (${status}): ${message}`);
   }
 }
+
 

@@ -156,14 +156,41 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({
             >
               {/* Card Top: Title & Actions */}
               <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <h3
-                    onClick={() => onOpenIdea(idea)}
-                    className="text-sm font-bold text-white hover:text-purple-300 transition-colors cursor-pointer truncate"
-                  >
-                    {idea.title}
-                  </h3>
-                  <div className="flex items-center gap-2 text-[11px] text-slate-400 mt-0.5">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap mb-1">
+                    <h3
+                      onClick={() => onOpenIdea(idea)}
+                      className="text-sm font-bold text-white hover:text-purple-300 transition-colors cursor-pointer truncate"
+                    >
+                      {idea.title}
+                    </h3>
+
+                    {/* V2 Status Badge */}
+                    <span
+                      className={`text-[10px] px-2 py-0.5 rounded-full font-medium border ${
+                        idea.status === 'completed'
+                          ? 'bg-emerald-950/70 border-emerald-800 text-emerald-300'
+                          : idea.status === 'in_progress'
+                          ? 'bg-blue-950/70 border-blue-800 text-blue-300'
+                          : 'bg-slate-800 border-slate-700 text-slate-400'
+                      }`}
+                    >
+                      {idea.status === 'completed'
+                        ? 'Đã hoàn thiện'
+                        : idea.status === 'in_progress'
+                        ? 'Đang phát triển'
+                        : 'Bản nháp'}
+                    </span>
+
+                    {/* Version Badge */}
+                    {idea.versions && idea.versions.length > 0 && (
+                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-md bg-purple-950/60 border border-purple-800 text-purple-300">
+                        V{(idea.versions?.length || 0) + 1}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-2 text-[11px] text-slate-400 mt-0.5 flex-wrap">
                     <span className="flex items-center gap-1">
                       <Calendar size={11} />
                       {formatDateTime(idea.createdAt)}
@@ -173,6 +200,14 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({
                         <span>•</span>
                         <span className="px-2 py-0.5 rounded-full bg-slate-800 text-[10px] text-purple-300">
                           {idea.context}
+                        </span>
+                      </>
+                    )}
+                    {idea.songDevelopment?.sections && idea.songDevelopment.sections.length > 0 && (
+                      <>
+                        <span>•</span>
+                        <span className="text-purple-400 font-mono text-[10px]">
+                          {idea.songDevelopment.sections.length} phân đoạn
                         </span>
                       </>
                     )}

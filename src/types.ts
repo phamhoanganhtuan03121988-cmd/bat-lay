@@ -10,6 +10,8 @@ export type CreativeContext =
 
 export type AnalysisStatus = 'idle' | 'analyzing' | 'completed' | 'error' | 'none' | 'pending';
 
+export type ProjectStatus = 'draft' | 'original' | 'in_progress' | 'completed';
+
 export type InputClassification =
   | 'singing_with_lyrics'
   | 'humming_melody'
@@ -21,17 +23,92 @@ export interface GenreSuggestion {
   reason: string;
 }
 
+export type SectionType =
+  | 'Intro'
+  | 'Verse 1'
+  | 'Pre-Chorus'
+  | 'Chorus'
+  | 'Verse 2'
+  | 'Bridge'
+  | 'Final Chorus'
+  | 'Outro'
+  | 'Custom';
+
+export type SongSectionType = SectionType;
+
+export interface SongSection {
+  id: string;
+  type: SectionType;
+  title: string;
+  content: string; // Ca từ hoặc ý tưởng cho đoạn
+  chords?: string; // Hợp âm đề xuất
+  notes?: string; // Ghi chú cảm xúc, nhịp điệu
+}
+
+export interface SongDevelopment {
+  developedLyrics: string;
+  sections: SongSection[];
+  hookSuggestion?: string;
+  melodyDevelopment?: string;
+  harmonyChords?: string;
+  arrangementDirection?: string;
+  lastDevelopedAt?: number;
+}
+
+export interface MelodyPitchPoint {
+  time: number; // thời gian (giây)
+  hz: number;   // tần số Hz
+  noteName: string; // Tên nốt (ví dụ "A3", "C4")
+}
+
+export interface MelodyAnalysisData {
+  pitchesHz: number[];
+  pitchPoints: MelodyPitchPoint[];
+  minHz: number;
+  maxHz: number;
+  peakHz: number;
+  peakNote: string;
+  pitchRangeSemitones: number;
+  contour: 'ascending' | 'descending' | 'melodic_wave' | 'speech_like' | 'flat' | 'indeterminate';
+  contourDescription: string;
+  sustainedRuns: number;
+}
+
+export interface ProjectVersion {
+  id: string;
+  versionNumber?: number;
+  name: string; // Ví dụ: "V1 — Bản gốc", "V2 — Phát triển lời", "V3 — Thêm Chorus"
+  savedAt?: number;
+  createdAt?: number;
+  lyrics?: string;
+  developedLyrics?: string;
+  sections?: SongSection[];
+  development?: SongDevelopment;
+  creativeControls?: { keepMelodyPct: number; keepLyricPct: number };
+  hookSuggestion?: string;
+  harmonyChords?: string;
+  arrangementDirection?: string;
+  melodyDevelopment?: string;
+  note?: string;
+  notes?: string;
+}
+
 export interface AudioIdea {
   id: string;
   title: string;
   createdAt: number;
+  updatedAt?: number;
   duration: number; // in seconds
   audioBlob: Blob;
   context?: CreativeContext | string;
   waveformData: number[]; // normalized amplitudes [0..1]
+  
+  // V2 Project Status (● Bản nháp, ● Đang phát triển, ● Đã hoàn thiện)
+  status?: ProjectStatus;
+
+  // Bản gốc (Audio & Phân tích gốc)
   transcript?: string | null;
   originalLyric?: string | null;
-  developedLyric?: string | null;
   emotion?: string | null;
   bpm?: number | null;
   musicalKey?: string | null;
@@ -46,8 +123,30 @@ export interface AudioIdea {
   needsAiConnectionFor?: string[];
   favorite: boolean;
   analysisStatus: AnalysisStatus;
+  analysisResult?: AudioAnalysisResult | null;
+  
+  // Creative Controls (0 - 100%)
   keepMelodyPct: number; // 0 - 100
   keepLyricPct: number; // 0 - 100
+  creativeControls?: {
+    keepMelodyPct: number;
+    keepLyricPct: number;
+  };
+
+  // V2 Song Development Data
+  lyrics?: string | null;
+  developedLyric?: string | null;
+  songSections?: SongSection[];
+  songDevelopment?: SongDevelopment;
+  hookSuggestion?: string | null;
+  melodyDevelopment?: string | null;
+  harmonyChords?: string | null;
+  arrangementDirection?: string | null;
+  melodyData?: MelodyAnalysisData | null;
+
+  // V2 Version Management
+  versions?: ProjectVersion[];
+  activeVersionId?: string;
 }
 
 export interface AudioAnalysisResult {
@@ -66,6 +165,15 @@ export interface AudioAnalysisResult {
   developmentIdeas: string[];
   analyzedWith: 'local_dsp' | 'gemini_multimodal' | 'hybrid';
   needsAiConnectionFor?: string[];
+  melodyData?: MelodyAnalysisData | null;
+  acousticFeatures?: {
+    avgRmsEnergy?: number;
+    silenceRatio?: number;
+    pitchContour?: string;
+    detectedNoteCount?: number;
+    dominantFreqHz?: number;
+    pitchesHz?: number[];
+  };
 }
 
 export interface AudioAnalysisProvider {
