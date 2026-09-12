@@ -17,6 +17,7 @@ import {
   Wand2,
   CheckCircle2,
   BookmarkCheck,
+  Activity,
 } from 'lucide-react';
 import { AudioIdea, AudioAnalysisResult, InputClassification, SongSection, ProjectStatus } from '../types';
 import { formatDateTime, formatDuration } from '../lib/formatters';
@@ -752,57 +753,88 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
             </div>
           </div>
         ) : currentIdea.analysisStatus === 'completed' ? (
-          <div className="space-y-3 text-xs">
-            <div className="flex items-center justify-between gap-2 p-2.5 rounded-2xl bg-slate-900/80 border border-slate-800 text-[11px]">
-              <div className="flex items-center gap-1.5 text-purple-300 font-medium">
-                <Mic size={13} />
-                <span>Loại ý tưởng: <strong>{getInputTypeLabel(currentIdea.inputType)}</strong></span>
+          <div className="space-y-3.5 text-xs">
+            {/* Nhóm 1: ĐO TỪ BẢN THU THỰC TẾ (Web Audio DSP) */}
+            <div className="p-3 rounded-2xl bg-slate-900/70 border border-slate-800 space-y-2">
+              <div className="flex items-center justify-between text-[11px] pb-1 border-b border-slate-800/80">
+                <span className="text-blue-400 font-bold uppercase tracking-wider flex items-center gap-1.5">
+                  <Activity size={13} />
+                  <span>Đo đạc từ bản thu (Web Audio DSP)</span>
+                </span>
+                <span className="text-[10px] text-slate-400 font-mono">Đo trực tiếp từ sóng âm</span>
               </div>
-              <div>
-                {currentIdea.analyzedWith === 'hybrid' ? (
-                  <span className="px-2 py-0.5 rounded-full bg-emerald-950/70 border border-emerald-800/60 text-[10px] text-emerald-300 font-mono flex items-center gap-1">
-                    <Sparkles size={9} /> Gemini 3.6 Flash
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-[11px]">
+                <div className="bg-slate-950/60 p-2 rounded-xl border border-slate-800/60">
+                  <span className="text-slate-400 block text-[10px]">Nhịp độ (BPM)</span>
+                  <span className="font-bold text-blue-300 font-mono">
+                    {currentIdea.bpm ? `${currentIdea.bpm} BPM` : 'Nhịp tự do'}
                   </span>
-                ) : (
-                  <span className="px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-[10px] text-slate-300 font-mono">
-                    DSP Cục bộ
+                </div>
+                <div className="bg-slate-950/60 p-2 rounded-xl border border-slate-800/60">
+                  <span className="text-slate-400 block text-[10px]">Giọng điệu ước tính</span>
+                  <span className="font-bold text-emerald-300 font-mono">
+                    {currentIdea.musicalKey || 'Tự do / Pentatonic'}
                   </span>
-                )}
+                </div>
+                <div className="bg-slate-950/60 p-2 rounded-xl border border-slate-800/60">
+                  <span className="text-slate-400 block text-[10px]">Thời lượng âm thanh</span>
+                  <span className="font-bold text-white font-mono">
+                    {Math.round(currentIdea.duration || 0)}s
+                  </span>
+                </div>
+                <div className="bg-slate-950/60 p-2 rounded-xl border border-slate-800/60">
+                  <span className="text-slate-400 block text-[10px]">Phân loại đầu vào</span>
+                  <span className="font-bold text-purple-300 truncate block">
+                    {getInputTypeLabel(currentIdea.inputType)}
+                  </span>
+                </div>
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-2">
-              <div className="p-3 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-1">
-                <span className="text-[10px] text-pink-400 font-semibold uppercase tracking-wider block">
-                  💭 Cảm xúc
+            {/* Nhóm 2: GỢI Ý & ĐỊNH HƯỚNG SÁNG TÁC (Gemini 3.6 Flash) */}
+            <div className="p-3 rounded-2xl bg-slate-900/70 border border-slate-800 space-y-2">
+              <div className="flex items-center justify-between text-[11px] pb-1 border-b border-slate-800/80">
+                <span className="text-pink-400 font-bold uppercase tracking-wider flex items-center gap-1.5">
+                  <Sparkles size={13} />
+                  <span>AI Gợi ý & Sáng tác (Gemini 3.6 Flash)</span>
                 </span>
-                <p className="text-white font-medium text-[11px] leading-snug">
-                  {currentIdea.emotion || 'Chưa đủ dữ liệu'}
-                </p>
+                <span className="text-[10px] text-pink-300 font-mono">Ý tưởng đề xuất</span>
               </div>
 
-              <div className="p-3 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-1">
-                <span className="text-[10px] text-blue-400 font-semibold uppercase tracking-wider block">
-                  🎼 Nhịp & Giọng
-                </span>
-                <p className="text-white font-medium text-[11px] leading-snug">
-                  {currentIdea.bpm ? `${currentIdea.bpm} BPM` : 'Nhịp tự do'} • {currentIdea.musicalKey || 'Chưa đủ dữ liệu'}
-                </p>
-              </div>
-
-              {currentIdea.developmentIdeas && currentIdea.developmentIdeas.length > 0 && (
-                <div className="p-3 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-1.5 col-span-2">
-                  <span className="text-[10px] text-amber-400 font-semibold uppercase tracking-wider flex items-center gap-1">
-                    <Lightbulb size={12} />
-                    <span>Gợi ý âm nhạc từ bản thu</span>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                <div className="bg-slate-950/60 p-2.5 rounded-xl border border-slate-800/60 space-y-1">
+                  <span className="text-[10px] text-pink-300 font-semibold uppercase tracking-wider block">
+                    💭 Cảm xúc gợi cảm hứng
                   </span>
-                  <ul className="space-y-1 text-[11px] text-slate-300 list-disc list-inside">
-                    {currentIdea.developmentIdeas.map((ideaText, i) => (
-                      <li key={i} className="leading-relaxed">{ideaText}</li>
-                    ))}
-                  </ul>
+                  <p className="text-white font-medium text-[11px] leading-snug">
+                    {currentIdea.emotion || 'Chân thành, lắng đọng'}
+                  </p>
                 </div>
-              )}
+
+                <div className="bg-slate-950/60 p-2.5 rounded-xl border border-slate-800/60 space-y-1">
+                  <span className="text-[10px] text-amber-300 font-semibold uppercase tracking-wider block">
+                    🎼 Hòa âm gợi ý
+                  </span>
+                  <p className="text-amber-200 font-mono text-[11px] leading-snug">
+                    {currentIdea.songDevelopment?.harmonyChords || currentIdea.harmonyChords || 'Am - F - C - G'}
+                  </p>
+                </div>
+
+                {currentIdea.developmentIdeas && currentIdea.developmentIdeas.length > 0 && (
+                  <div className="bg-slate-950/60 p-2.5 rounded-xl border border-slate-800/60 space-y-1.5 sm:col-span-2">
+                    <span className="text-[10px] text-purple-300 font-semibold uppercase tracking-wider flex items-center gap-1">
+                      <Lightbulb size={12} />
+                      <span>Gợi ý mở rộng bài hát</span>
+                    </span>
+                    <ul className="space-y-1 text-[11px] text-slate-300 list-disc list-inside">
+                      {currentIdea.developmentIdeas.map((ideaText, i) => (
+                        <li key={i} className="leading-relaxed">{ideaText}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         ) : (

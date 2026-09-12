@@ -92,20 +92,47 @@ export interface MusicBlueprint {
   lyria_prompt: string;
 }
 
+export const LYRIA_CLIP_ESTIMATED_COST = 0.04;
+export const LYRIA_FULL_ESTIMATED_COST = 0.08;
+
+export type GenerationType = 'clip' | 'full';
+
+export interface GenerationRecord {
+  id: string;
+  projectId: string;
+  model: string;
+  prompt: string;
+  generationType: GenerationType;
+  estimatedCost: number;
+  createdAt: number;
+  status: 'success' | 'blocked' | 'error';
+  errorCode?: string;
+  errorMessage?: string;
+}
+
 export interface GeneratedSong {
   id: string;
   projectId: string;
-  versionName: string; // e.g. "Demo 01"
+  versionName: string; // e.g. "Demo 01", "Clip 30s"
   createdAt: number;
-  model: string; // "lyria-3.5"
+  model: string; // "lyria-3-clip-preview" | "lyria-3.5"
   mimeType: string;
   audioBlob: Blob;
   duration?: number;
   blueprint: MusicBlueprint;
   lyriaPrompt: string;
+  generationType?: GenerationType;
+  estimatedCost?: number;
 }
 
-export type DemoStatus = 'idle' | 'preparing_blueprint' | 'generating_audio' | 'completed' | 'error';
+export type DemoStatus =
+  | 'idle'
+  | 'preparing_blueprint'
+  | 'generating_clip'
+  | 'generating_full'
+  | 'generating_audio'
+  | 'completed'
+  | 'error';
 
 export interface ProjectVersion {
   id: string;
@@ -181,12 +208,13 @@ export interface AudioIdea {
   versions?: ProjectVersion[];
   activeVersionId?: string;
 
-  // V3 Lyria Demo Generation
+  // V3 & V3.1 Lyria Demo Generation
   generatedSongs?: GeneratedSong[];
   activeGeneratedSongId?: string;
   musicBlueprint?: MusicBlueprint;
   demoStatus?: DemoStatus;
   demoError?: string | null;
+  generationRecords?: GenerationRecord[];
 }
 
 export interface AudioAnalysisResult {

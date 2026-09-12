@@ -254,4 +254,38 @@ export async function switchGeneratedSong(
   });
 }
 
+/**
+ * V3.1 Lyria Debug Logging: Save a generation record to IndexedDB
+ * Logs verbatim prompt, model, status, error for transparency without storing API keys.
+ */
+export async function saveGenerationRecord(
+  record: import('../types').GenerationRecord
+): Promise<void> {
+  try {
+    const idea = await getIdeaById(record.projectId);
+    if (!idea) return;
+
+    const existingRecords = idea.generationRecords || [];
+    const updatedRecords = [...existingRecords, record];
+
+    await updateIdea(record.projectId, {
+      generationRecords: updatedRecords,
+      updatedAt: Date.now(),
+    });
+  } catch (err) {
+    console.warn('Failed to save generation record to idea:', err);
+  }
+}
+
+/**
+ * Get generation records for debugging
+ */
+export async function getGenerationRecords(
+  projectId: string
+): Promise<import('../types').GenerationRecord[]> {
+  const idea = await getIdeaById(projectId);
+  return idea?.generationRecords || [];
+}
+
+
 
