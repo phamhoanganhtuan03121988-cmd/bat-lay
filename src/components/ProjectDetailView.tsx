@@ -30,6 +30,7 @@ import { MelodyVisualizer } from './MelodyVisualizer';
 import { SongStructureEditor } from './SongStructureEditor';
 import { LyricDevelopmentEditor } from './LyricDevelopmentEditor';
 import { VersionManagerBar } from './VersionManagerBar';
+import { SongDemoSection } from './SongDemoSection';
 
 interface ProjectDetailViewProps {
   idea: AudioIdea;
@@ -349,16 +350,17 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
   };
 
   const timelineSteps = [
-    { label: 'Ý tưởng gốc', icon: '🎙', status: 'completed' },
+    { label: 'Ý tưởng gốc', icon: '🎙️', status: 'completed' },
     {
       label: 'AI hiểu',
       icon: '🧠',
       status: currentIdea.analysisStatus === 'completed' ? 'completed' : isAnalyzing ? 'active' : 'ready',
     },
-    { label: 'Lời hát', icon: '📝', status: developedLyric ? 'completed' : currentIdea.originalLyric ? 'active' : 'upcoming' },
-    { label: 'Cấu trúc', icon: '🎼', status: currentIdea.songDevelopment?.sections?.length ? 'completed' : 'upcoming' },
-    { label: 'Giai điệu', icon: '🎹', status: currentIdea.melodyData ? 'completed' : 'upcoming' },
-    { label: 'Bài hát', icon: '🎧', status: currentIdea.status === 'completed' ? 'completed' : currentIdea.status === 'in_progress' ? 'active' : 'upcoming' },
+    { label: 'Lời', icon: '📝', status: developedLyric ? 'completed' : currentIdea.originalLyric ? 'active' : 'upcoming' },
+    { label: 'Cấu trúc', icon: '🧩', status: currentIdea.songDevelopment?.sections?.length ? 'completed' : 'upcoming' },
+    { label: 'Giai điệu', icon: '🎼', status: currentIdea.melodyData ? 'completed' : 'upcoming' },
+    { label: 'Music Blueprint', icon: '🎹', status: currentIdea.musicBlueprint ? 'completed' : 'upcoming' },
+    { label: 'Bản demo', icon: '🎧', status: (currentIdea.generatedSongs && currentIdea.generatedSongs.length > 0) ? 'completed' : currentIdea.demoStatus === 'generating_audio' ? 'active' : 'upcoming' },
   ];
 
   return (
@@ -640,6 +642,24 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
           </div>
         </div>
       </div>
+
+      {/* V3 Section: BẢN DEMO BÀI HÁT (Lyria 3.5) */}
+      <SongDemoSection
+        idea={currentIdea}
+        onIdeaUpdated={(updated) => {
+          setCurrentIdea(updated);
+          onUpdateIdea(updated.id, updated);
+        }}
+        onNotify={(msg, type) => {
+          if (type === 'success') {
+            setDevelopSuccessNotice(msg);
+            setTimeout(() => setDevelopSuccessNotice(null), 6000);
+          } else if (type === 'error') {
+            setDevelopSongError(msg);
+            setTimeout(() => setDevelopSongError(null), 6000);
+          }
+        }}
+      />
 
       {/* AI Analysis Findings (THẤU HIỂU Ý TƯỞNG) */}
       <div className="p-4 rounded-3xl bg-[#0F172A]/80 border border-slate-800/80 space-y-4">

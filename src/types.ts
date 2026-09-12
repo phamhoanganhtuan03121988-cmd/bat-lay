@@ -74,6 +74,39 @@ export interface MelodyAnalysisData {
   sustainedRuns: number;
 }
 
+export interface MusicBlueprint {
+  title: string;
+  language: string;
+  genre: string;
+  mood: string;
+  tempo_bpm: number;
+  key: string;
+  duration_target: string;
+  vocal_style: string;
+  lyrics: string;
+  song_structure: string[] | SongSection[];
+  melody_direction: string;
+  harmony: string;
+  instrumentation: string;
+  production_direction: string;
+  lyria_prompt: string;
+}
+
+export interface GeneratedSong {
+  id: string;
+  projectId: string;
+  versionName: string; // e.g. "Demo 01"
+  createdAt: number;
+  model: string; // "lyria-3.5"
+  mimeType: string;
+  audioBlob: Blob;
+  duration?: number;
+  blueprint: MusicBlueprint;
+  lyriaPrompt: string;
+}
+
+export type DemoStatus = 'idle' | 'preparing_blueprint' | 'generating_audio' | 'completed' | 'error';
+
 export interface ProjectVersion {
   id: string;
   versionNumber?: number;
@@ -147,6 +180,13 @@ export interface AudioIdea {
   // V2 Version Management
   versions?: ProjectVersion[];
   activeVersionId?: string;
+
+  // V3 Lyria Demo Generation
+  generatedSongs?: GeneratedSong[];
+  activeGeneratedSongId?: string;
+  musicBlueprint?: MusicBlueprint;
+  demoStatus?: DemoStatus;
+  demoError?: string | null;
 }
 
 export interface AudioAnalysisResult {

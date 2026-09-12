@@ -210,3 +210,48 @@ export async function switchIdeaVersion(id: string, versionId: string): Promise<
   });
 }
 
+/**
+ * V3 Lyria Demo Generation: Save a newly synthesized demo song
+ * Appends to generatedSongs array, preserves all past versions and original recording.
+ */
+export async function saveGeneratedSong(
+  projectId: string,
+  song: import('../types').GeneratedSong
+): Promise<import('../types').AudioIdea> {
+  const idea = await getIdeaById(projectId);
+  if (!idea) {
+    throw new Error(`Idea with id ${projectId} not found.`);
+  }
+
+  const existingDemos = idea.generatedSongs || [];
+  const updatedDemos = [...existingDemos, song];
+
+  return await updateIdea(projectId, {
+    generatedSongs: updatedDemos,
+    activeGeneratedSongId: song.id,
+    musicBlueprint: song.blueprint,
+    demoStatus: 'completed',
+    demoError: null,
+    updatedAt: Date.now(),
+  });
+}
+
+/**
+ * V3 Lyria Demo Generation: Switch active demo song
+ */
+export async function switchGeneratedSong(
+  projectId: string,
+  songId: string
+): Promise<import('../types').AudioIdea> {
+  const idea = await getIdeaById(projectId);
+  if (!idea) {
+    throw new Error(`Idea with id ${projectId} not found.`);
+  }
+
+  return await updateIdea(projectId, {
+    activeGeneratedSongId: songId,
+    updatedAt: Date.now(),
+  });
+}
+
+
