@@ -157,12 +157,12 @@ export const AiSettingsModal: React.FC<AiSettingsModalProps> = ({
               />
               <span className="font-medium text-[11px]">
                 {hasExistingKey
-                  ? 'AI đã được kết nối (Gemini 2.5 Flash)'
+                  ? 'AI đã được kết nối (Gemini 3.6 Flash)'
                   : 'AI chưa được kết nối'}
               </span>
             </div>
             <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-black/40 text-slate-300">
-              Model: gemini-2.5-flash
+              Model: gemini-3.6-flash
             </span>
           </div>
 

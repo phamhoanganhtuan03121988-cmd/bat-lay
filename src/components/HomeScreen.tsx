@@ -54,7 +54,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               aria-label="Cài đặt Gemini AI"
             >
               <Key size={11} className={isAiConnected ? 'text-emerald-400' : 'text-slate-400'} />
-              <span>{isAiConnected ? 'Gemini 2.5 AI' : 'Gắn AI Key'}</span>
+              <span>{isAiConnected ? 'Gemini 3.6 Flash' : 'Gắn AI Key'}</span>
             </button>
           )}
         </div>

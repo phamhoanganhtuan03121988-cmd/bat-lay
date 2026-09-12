@@ -40,8 +40,17 @@ export interface AudioAnalysisResult {
   };
 }
 
+export interface CreativitySettings {
+  keepMelodyPct?: number; // 0 - 100
+  keepLyricPct?: number;  // 0 - 100
+}
+
 export interface AudioAnalysisProvider {
   name: string;
   isAiConnected(): boolean;
-  analyzeAudio(blob: Blob, duration: number): Promise<AudioAnalysisResult>;
+  analyzeAudio(
+    blob: Blob,
+    duration: number,
+    creativitySettings?: CreativitySettings
+  ): Promise<AudioAnalysisResult>;
 }

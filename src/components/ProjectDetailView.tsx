@@ -101,7 +101,11 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
     try {
       const result: AudioAnalysisResult = await defaultAudioAnalyzer.analyzeAudio(
         currentIdea.audioBlob,
-        currentIdea.duration
+        currentIdea.duration,
+        {
+          keepMelodyPct,
+          keepLyricPct,
+        }
       );
 
       const updates: Partial<AudioIdea> = {
@@ -215,7 +219,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
             }`}
           >
             <Key size={11} />
-            <span>{isAiConnected ? 'Gemini 2.5 Flash' : 'Chưa gắn AI Key'}</span>
+            <span>{isAiConnected ? 'Gemini 3.6 Flash' : 'Chưa gắn AI Key'}</span>
           </button>
         </div>
       </div>
@@ -319,7 +323,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
               </h3>
               <p className="text-[10px] text-slate-400">
                 {currentIdea.analyzedWith === 'hybrid'
-                  ? 'Web Audio DSP + Gemini 2.5 Flash'
+                  ? 'Web Audio DSP + Gemini 3.6 Flash'
                   : 'Web Audio DSP trên thiết bị'}
               </p>
             </div>
@@ -362,7 +366,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
               </h3>
               <p className="text-xs text-purple-200/90 font-medium">
                 {isAiConnected
-                  ? 'Đang đo đạc DSP và gửi tới Gemini 2.5 Flash đa phương thức...'
+                  ? 'Đang đo đạc DSP và gửi tới Gemini 3.6 Flash đa phương thức...'
                   : 'Đang trích xuất nhịp, gam giọng và đường nét giai điệu trên thiết bị...'}
               </p>
             </div>
@@ -424,7 +428,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                 {currentIdea.analyzedWith === 'hybrid' ? (
                   <span className="px-2 py-0.5 rounded-full bg-emerald-950/70 border border-emerald-800/60 text-[10px] text-emerald-300 font-mono flex items-center gap-1">
                     <Sparkles size={9} />
-                    Gemini 2.5 AI
+                    Gemini 3.6 Flash
                   </span>
                 ) : (
                   <span className="px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-[10px] text-slate-300 font-mono">
@@ -533,7 +537,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                   </button>
                 </div>
                 <p className="text-slate-300 text-[10.5px] leading-relaxed">
-                  Bản phân tích hiện tại được tính toán bằng bộ xử lý DSP cục bộ trên thiết bị. Để tự động nhận diện lời hát tiếng Việt và phát triển ca từ bằng Gemini 2.5 Flash, bạn có thể kết nối API Key cá nhân của mình.
+                  Bản phân tích hiện tại được tính toán bằng bộ xử lý DSP cục bộ trên thiết bị. Để tự động nhận diện lời hát tiếng Việt và phát triển ca từ bằng Gemini 3.6 Flash, bạn có thể kết nối API Key cá nhân của mình.
                 </p>
               </div>
             ) : (
@@ -541,7 +545,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                 <div className="flex items-center justify-between text-purple-300 font-semibold">
                   <div className="flex items-center gap-1.5">
                     <Cpu size={12} />
-                    <span>Bản thu đã được đồng bộ với Gemini 2.5 Flash</span>
+                    <span>Bản thu đã được đồng bộ với Gemini 3.6 Flash</span>
                   </div>
                   <button
                     onClick={() => setIsSettingsOpen(true)}
@@ -551,7 +555,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                   </button>
                 </div>
                 <p className="leading-relaxed text-[10.5px]">
-                  BPM, Key và đường nét cao độ do DSP đo đạc. Nhận diện ca từ tiếng Việt, cảm xúc và gợi ý phát triển do Gemini 2.5 Flash xử lý trực tiếp.
+                  BPM, Key và đường nét cao độ do DSP đo đạc. Nhận diện ca từ tiếng Việt, cảm xúc và gợi ý phát triển do Gemini 3.6 Flash xử lý trực tiếp.
                 </p>
               </div>
             )}
@@ -568,7 +572,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
 
             <p className="text-xs text-slate-300 leading-relaxed max-w-xs mx-auto">
               {isAiConnected
-                ? 'Nhấn để bắt đầu phân tích nhịp độ, gam giọng bằng Web Audio DSP và lắng nghe nhận diện lời hát với Gemini 2.5 Flash.'
+                ? 'Nhấn để bắt đầu phân tích nhịp độ, gam giọng bằng Web Audio DSP và lắng nghe nhận diện lời hát với Gemini 3.6 Flash.'
                 : 'BẮT LẤY có thể đo nhịp (BPM) và gam giọng bằng DSP trên máy. Bạn có thể kết nối Gemini API cá nhân để nhận diện lời hát và phát triển ca từ.'}
             </p>
 
@@ -579,7 +583,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                 className="py-2.5 px-5 rounded-2xl bg-linear-to-r from-purple-600 to-pink-600 text-white text-xs font-bold inline-flex items-center gap-2 shadow-md shadow-purple-900/40 active:scale-95 transition-all"
               >
                 <Sparkles size={14} />
-                <span>{isAiConnected ? 'Phân tích với Gemini 2.5 Flash' : 'Phân tích ý tưởng này'}</span>
+                <span>{isAiConnected ? 'Phân tích với Gemini 3.6 Flash' : 'Phân tích ý tưởng này'}</span>
               </button>
 
               {!isAiConnected && (

@@ -2,7 +2,7 @@
  * AudioAnalysisProvider Factory & Composite Dispatcher
  */
 
-import { AudioAnalysisProvider, AudioAnalysisResult } from './types';
+import { AudioAnalysisProvider, AudioAnalysisResult, CreativitySettings } from './types';
 import { analyzeAudioWithLocalDSP } from './localAudioAnalyzer';
 import { GeminiAudioAnalysisProvider } from './geminiProvider';
 
@@ -14,7 +14,11 @@ export class CompositeAudioAnalysisProvider implements AudioAnalysisProvider {
     return this.geminiProvider.isAiConnected();
   }
 
-  async analyzeAudio(blob: Blob, duration: number): Promise<AudioAnalysisResult> {
+  async analyzeAudio(
+    blob: Blob,
+    duration: number,
+    creativitySettings?: CreativitySettings
+  ): Promise<AudioAnalysisResult> {
     if (!blob || blob.size === 0) {
       throw new Error('Không có dữ liệu âm thanh hợp lệ để phân tích.');
     }
@@ -22,10 +26,15 @@ export class CompositeAudioAnalysisProvider implements AudioAnalysisProvider {
     // 1. ALWAYS run real Web Audio DSP directly on the user's recorded Blob
     const dspResult = await analyzeAudioWithLocalDSP(blob, duration);
 
-    // 2. If Gemini BYOK is connected, enrich with Multimodal Gemini 2.5 Flash
+    // 2. If Gemini BYOK is connected, enrich with Multimodal Gemini 3.6 Flash
     if (this.isAiConnected()) {
       try {
-        const enrichedResult = await this.geminiProvider.analyzeWithDSP(blob, duration, dspResult);
+        const enrichedResult = await this.geminiProvider.analyzeWithDSP(
+          blob,
+          duration,
+          dspResult,
+          creativitySettings
+        );
         return enrichedResult;
       } catch (aiErr) {
         console.warn('Gemini AI enrichment failed, returning local DSP with error flag:', aiErr);
